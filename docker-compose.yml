@@ -1,0 +1,109 @@
+version: '3.8'
+
+services:
+  # 데이터베이스
+  postgres:
+    image: postgres:15-alpine
+    container_name: signal_postgres
+    environment:
+      POSTGRES_DB: signal
+      POSTGRES_USER: signal
+      POSTGRES_PASSWORD: signal_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - signal_network
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: signal_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - signal_network
+
+  # Backend API
+  be:
+    build:
+      context: ./be
+      dockerfile: Dockerfile
+    container_name: signal_be
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=signal
+      - DB_PASSWORD=signal_password
+      - DB_NAME=signal
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=your-super-secret-jwt-key-change-in-production
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - signal_network
+    volumes:
+      - ./be:/app
+    restart: unless-stopped
+
+  # Worker 서비스
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    container_name: signal_worker
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=signal
+      - DB_PASSWORD=signal_password
+      - DB_NAME=signal
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - signal_network
+    volumes:
+      - ./worker:/app
+    restart: unless-stopped
+
+  # Scheduler 서비스
+  scheduler:
+    build:
+      context: ./scheduler
+      dockerfile: Dockerfile
+    container_name: signal_scheduler
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=signal
+      - DB_PASSWORD=signal_password
+      - DB_NAME=signal
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - signal_network
+    volumes:
+      - ./scheduler:/app
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  signal_network:
+    driver: bridge
