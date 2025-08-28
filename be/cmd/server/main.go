@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -60,14 +59,15 @@ func main() {
 	userService := services.NewUserService(userRepo, jwtManager, appLogger)
 	signalService := services.NewSignalService(signalRepo, userRepo, redisClient, jobQueue, appLogger)
 	chatService := services.NewChatService(chatRepo, signalRepo, redisClient, appLogger)
-	websocketService := services.NewWebSocketService(appLogger)
+	websocketService := services.NewWebSocketService(appLogger, redisClient)
 
 	userHandler := handlers.NewUserHandler(userService, appLogger)
 	authHandler := handlers.NewAuthHandler(userService, appLogger)
+	oauthHandler := handlers.NewOAuthHandler(cfg, userService, appLogger)
 	signalHandler := handlers.NewSignalHandler(signalService, appLogger)
 	chatHandler := handlers.NewChatHandler(chatService, websocketService, appLogger)
 
-	router := setupRouter(cfg, userHandler, authHandler, signalHandler, chatHandler, jwtManager, appLogger)
+	router := setupRouter(cfg, userHandler, authHandler, oauthHandler, signalHandler, chatHandler, websocketService, jwtManager, appLogger)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Server.Port,
@@ -103,8 +103,10 @@ func setupRouter(
 	cfg *config.Config,
 	userHandler *handlers.UserHandler,
 	authHandler *handlers.AuthHandler,
+	oauthHandler *handlers.OAuthHandler,
 	signalHandler *handlers.SignalHandler,
 	chatHandler *handlers.ChatHandler,
+	websocketService *services.WebSocketService,
 	jwtManager *utils.JWTManager,
 	appLogger *logger.Logger,
 ) *gin.Engine {
@@ -135,6 +137,11 @@ func setupRouter(
 			auth.POST("/register", authHandler.Register)
 			auth.POST("/login", authHandler.Login)
 			auth.POST("/refresh", authHandler.RefreshToken)
+			
+			// OAuth 로그인
+			auth.GET("/:provider/login", oauthHandler.StartOAuthLogin)
+			auth.GET("/:provider/callback", oauthHandler.OAuthCallback)
+			auth.GET("/oauth/providers", oauthHandler.GetSupportedProviders)
 		}
 
 		// 인증 필요
@@ -156,12 +163,15 @@ func setupRouter(
 			{
 				signals.POST("", signalHandler.CreateSignal)
 				signals.GET("", signalHandler.SearchSignals)
+				signals.GET("/nearby", signalHandler.GetNearbySignals)
 				signals.GET("/my", signalHandler.GetMySignals)
 				signals.GET("/:id", signalHandler.GetSignal)
 				signals.POST("/:id/join", signalHandler.JoinSignal)
 				signals.POST("/:id/leave", signalHandler.LeaveSignal)
 				signals.POST("/:id/approve/:user_id", signalHandler.ApproveParticipant)
 				signals.POST("/:id/reject/:user_id", signalHandler.RejectParticipant)
+				// 실시간 시그널 업데이트 WebSocket
+				signals.GET("/ws", websocketService.HandleSignalWebSocket)
 			}
 
 			// 채팅

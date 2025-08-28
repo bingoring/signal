@@ -148,10 +148,12 @@ type ReportUser struct {
 
 // DTO 구조체들
 type CreateUserRequest struct {
-	Email       string `json:"email" binding:"required,email"`
-	Username    string `json:"username" binding:"required,min=3,max=20"`
-	DisplayName string `json:"display_name" binding:"required,min=2,max=50"`
-	Provider    string `json:"provider"`
+	Email       string  `json:"email" binding:"required,email"`
+	Username    string  `json:"username" binding:"required,min=3,max=20"`
+	DisplayName string  `json:"display_name" binding:"required,min=2,max=50"`
+	Provider    string  `json:"provider"`
+	GoogleID    *string `json:"google_id,omitempty"`
+	AppleID     *string `json:"apple_id,omitempty"`
 }
 
 type UpdateProfileRequest struct {

@@ -1,8 +1,6 @@
 package repositories
 
 import (
-	"fmt"
-
 	"signal-module/pkg/models"
 
 	"gorm.io/gorm"
@@ -13,6 +11,7 @@ type UserRepositoryInterface interface {
 	GetByID(id uint) (*models.User, error)
 	GetByEmail(email string) (*models.User, error)
 	GetByUsername(username string) (*models.User, error)
+	GetByGoogleID(googleID string) (*models.User, error)
 	Update(user *models.User) error
 	UpdateLocation(userID uint, location *models.UserLocation) error
 	UpdateInterests(userID uint, interests []models.UserInterest) error
@@ -59,6 +58,15 @@ func (r *UserRepository) GetByEmail(email string) (*models.User, error) {
 func (r *UserRepository) GetByUsername(username string) (*models.User, error) {
 	var user models.User
 	err := r.db.Where("username = ?", username).First(&user).Error
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *UserRepository) GetByGoogleID(googleID string) (*models.User, error) {
+	var user models.User
+	err := r.db.Preload("Profile").Where("google_id = ?", googleID).First(&user).Error
 	if err != nil {
 		return nil, err
 	}

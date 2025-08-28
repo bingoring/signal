@@ -15,6 +15,7 @@ type Config struct {
 	Redis    RedisConfig
 	Push     PushConfig
 	Location LocationConfig
+	OAuth    OAuthConfig
 }
 
 type DatabaseConfig struct {
@@ -53,6 +54,16 @@ type PushConfig struct {
 type LocationConfig struct {
 	DefaultRadius float64 // 기본 검색 반경 (미터)
 	MaxRadius     float64 // 최대 검색 반경 (미터)
+}
+
+type OAuthConfig struct {
+	Google GoogleConfig
+}
+
+type GoogleConfig struct {
+	ClientID     string
+	ClientSecret string
+	RedirectURL  string
 }
 
 func LoadConfig() *Config {
@@ -94,6 +105,13 @@ func LoadConfig() *Config {
 		Location: LocationConfig{
 			DefaultRadius: getEnvAsFloat("DEFAULT_RADIUS", 5000.0), // 5km
 			MaxRadius:     getEnvAsFloat("MAX_RADIUS", 50000.0),    // 50km
+		},
+		OAuth: OAuthConfig{
+			Google: GoogleConfig{
+				ClientID:     getEnv("GOOGLE_CLIENT_ID", ""),
+				ClientSecret: getEnv("GOOGLE_CLIENT_SECRET", ""),
+				RedirectURL:  getEnv("GOOGLE_REDIRECT_URL", "http://localhost:8080/api/v1/auth/google/callback"),
+			},
 		},
 	}
 }

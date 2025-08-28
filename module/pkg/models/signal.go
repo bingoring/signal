@@ -1,6 +1,7 @@
 package models
 
 import (
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -26,6 +27,7 @@ type Signal struct {
 	// 위치 정보
 	Latitude  float64 `json:"latitude" gorm:"not null"`
 	Longitude float64 `json:"longitude" gorm:"not null"`
+	Location  string  `json:"-" gorm:"type:geometry(Point,4326);index:,type:gist"` // PostGIS Point
 	Address   string  `json:"address" gorm:"size:200"`
 	PlaceName string  `json:"place_name" gorm:"size:100"`
 	
@@ -121,4 +123,19 @@ type SearchSignalRequest struct {
 type SignalWithDistance struct {
 	Signal   `json:",inline"`
 	Distance float64 `json:"distance"` // 미터 단위
+}
+
+// PostGIS 헬퍼 메서드들
+func (s *Signal) SetLocationFromCoordinates() {
+	s.Location = fmt.Sprintf("POINT(%f %f)", s.Longitude, s.Latitude)
+}
+
+func (s *Signal) BeforeCreate(tx *gorm.DB) (err error) {
+	s.SetLocationFromCoordinates()
+	return
+}
+
+func (s *Signal) BeforeUpdate(tx *gorm.DB) (err error) {
+	s.SetLocationFromCoordinates()
+	return
 }

@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"strconv"
-
 	"signal-be/internal/services"
 	"signal-module/pkg/logger"
 	"signal-module/pkg/models"

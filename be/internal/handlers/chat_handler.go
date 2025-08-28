@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"signal-be/internal/services"
 	"signal-module/pkg/logger"
 	"signal-module/pkg/utils"
 

@@ -14,8 +14,12 @@ import (
 
 type UserServiceInterface interface {
 	Register(req *models.CreateUserRequest) (*models.User, string, string, error)
+	RegisterOAuth(req *models.CreateUserRequest) (*models.User, string, string, error)
 	Login(email, password string) (*models.User, string, string, error)
 	GetUserByID(userID uint) (*models.User, error)
+	GetUserByEmail(email string) (*models.User, error)
+	GetUserByUsername(username string) (*models.User, error)
+	GetUserByGoogleID(googleID string) (*models.User, error)
 	UpdateProfile(userID uint, req *models.UpdateProfileRequest) error
 	UpdateLocation(userID uint, req *models.UpdateLocationRequest) error
 	UpdateInterests(userID uint, interests []models.UserInterest) error
@@ -87,6 +91,90 @@ func (s *UserService) Register(req *models.CreateUserRequest) (*models.User, str
 	s.logger.Info(fmt.Sprintf("새 사용자 등록: %s (%s)", user.Username, user.Email))
 
 	return user, accessToken, refreshToken, nil
+}
+
+func (s *UserService) RegisterOAuth(req *models.CreateUserRequest) (*models.User, string, string, error) {
+	// 이메일 중복 확인
+	if existingUser, _ := s.userRepo.GetByEmail(req.Email); existingUser != nil {
+		return nil, "", "", fmt.Errorf("이미 사용중인 이메일입니다")
+	}
+
+	// 사용자명 중복 확인
+	if existingUser, _ := s.userRepo.GetByUsername(req.Username); existingUser != nil {
+		return nil, "", "", fmt.Errorf("이미 사용중인 사용자명입니다")
+	}
+
+	user := &models.User{
+		Email:    req.Email,
+		Username: req.Username,
+		Provider: req.Provider,
+		IsActive: true,
+	}
+
+	// OAuth 제공업체별 ID 설정
+	if req.Provider == "google" && req.GoogleID != nil {
+		user.GoogleID = req.GoogleID
+	}
+
+	// 사용자 생성
+	if err := s.userRepo.Create(user); err != nil {
+		s.logger.Error("OAuth 사용자 생성 실패", err)
+		return nil, "", "", fmt.Errorf("사용자 생성에 실패했습니다")
+	}
+
+	// 프로필 생성
+	profile := &models.UserProfile{
+		UserID:      user.ID,
+		DisplayName: req.DisplayName,
+		MannerScore: 36.5, // 기본 매너 점수 (36.5도)
+	}
+
+	user.Profile = profile
+
+	// JWT 토큰 생성
+	accessToken, refreshToken, err := s.jwtManager.GenerateTokenPair(user)
+	if err != nil {
+		s.logger.Error("토큰 생성 실패", err)
+		return nil, "", "", fmt.Errorf("토큰 생성에 실패했습니다")
+	}
+
+	s.logger.Info(fmt.Sprintf("새 OAuth 사용자 등록: %s (%s) via %s", 
+		user.Username, user.Email, user.Provider))
+
+	return user, accessToken, refreshToken, nil
+}
+
+func (s *UserService) GetUserByEmail(email string) (*models.User, error) {
+	user, err := s.userRepo.GetByEmail(email)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("사용자를 찾을 수 없습니다")
+		}
+		return nil, err
+	}
+	return user, nil
+}
+
+func (s *UserService) GetUserByUsername(username string) (*models.User, error) {
+	user, err := s.userRepo.GetByUsername(username)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("사용자를 찾을 수 없습니다")
+		}
+		return nil, err
+	}
+	return user, nil
+}
+
+func (s *UserService) GetUserByGoogleID(googleID string) (*models.User, error) {
+	user, err := s.userRepo.GetByGoogleID(googleID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("사용자를 찾을 수 없습니다")
+		}
+		return nil, err
+	}
+	return user, nil
 }
 
 func (s *UserService) Login(email, password string) (*models.User, string, string, error) {

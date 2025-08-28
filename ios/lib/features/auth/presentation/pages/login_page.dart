@@ -1,7 +1,33 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class LoginPage extends StatelessWidget {
   const LoginPage({super.key});
+  
+  void _handleGoogleLogin(BuildContext context) async {
+    try {
+      // 백엔드 OAuth URL 요청
+      const String oauthUrl = 'http://localhost:8080/api/v1/auth/google/login';
+      
+      // 브라우저에서 Google OAuth 시작
+      final Uri uri = Uri.parse(oauthUrl);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Google 로그인을 시작할 수 없습니다')),
+          );
+        }
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Google 로그인 중 오류가 발생했습니다')),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -66,6 +92,47 @@ class LoginPage extends StatelessWidget {
                 child: const Text(
                   '시작하기',
                   style: TextStyle(fontSize: 18),
+                ),
+              ),
+              
+              const SizedBox(height: 16),
+              
+              const SizedBox(height: 16),
+              
+              // 구분선
+              const Row(
+                children: [
+                  Expanded(child: Divider()),
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: Text(
+                      '또는',
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                  ),
+                  Expanded(child: Divider()),
+                ],
+              ),
+              
+              const SizedBox(height: 16),
+              
+              // Google 로그인 버튼
+              OutlinedButton.icon(
+                onPressed: () {
+                  // Google OAuth 로그인
+                  _handleGoogleLogin(context);
+                },
+                icon: Image.asset(
+                  'assets/images/google_logo.png', // Google 로고 이미지 필요
+                  height: 20,
+                  width: 20,
+                ),
+                label: const Text('Google로 계속하기'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
               ),
               

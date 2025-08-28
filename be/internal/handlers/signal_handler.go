@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"fmt"
 	"strconv"
+	"strings"
 
 	"signal-be/internal/services"
 	"signal-module/pkg/logger"
@@ -152,6 +154,85 @@ func (h *SignalHandler) ApproveParticipant(c *gin.Context) {
 }
 
 func (h *SignalHandler) RejectParticipant(c *gin.Context) {
-	// 승인과 유사한 로직으로 구현
+	creatorID := c.GetUint("user_id")
+	
+	signalID, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		utils.BadRequestResponse(c, "유효하지 않은 시그널 ID입니다")
+		return
+	}
+
+	participantID, err := strconv.ParseUint(c.Param("user_id"), 10, 32)
+	if err != nil {
+		utils.BadRequestResponse(c, "유효하지 않은 사용자 ID입니다")
+		return
+	}
+
+	if err := h.signalService.RejectParticipant(uint(signalID), creatorID, uint(participantID)); err != nil {
+		utils.BadRequestResponse(c, err.Error())
+		return
+	}
+
 	utils.SuccessResponse(c, "참여자를 거절했습니다", nil)
+}
+
+// GetNearbySignals 근처 시그널들을 실시간으로 조회
+func (h *SignalHandler) GetNearbySignals(c *gin.Context) {
+	// 쿼리 파라미터에서 위치 정보 받기
+	latStr := c.Query("lat")
+	lonStr := c.Query("lon")
+	radiusStr := c.DefaultQuery("radius", "5000")
+	categoriesStr := c.Query("categories")
+
+	if latStr == "" || lonStr == "" {
+		utils.BadRequestResponse(c, "위치 정보(lat, lon)가 필요합니다")
+		return
+	}
+
+	lat, err := strconv.ParseFloat(latStr, 64)
+	if err != nil {
+		utils.BadRequestResponse(c, "유효하지 않은 위도입니다")
+		return
+	}
+
+	lon, err := strconv.ParseFloat(lonStr, 64)
+	if err != nil {
+		utils.BadRequestResponse(c, "유효하지 않은 경도입니다")
+		return
+	}
+
+	radius, err := strconv.ParseFloat(radiusStr, 64)
+	if err != nil {
+		utils.BadRequestResponse(c, "유효하지 않은 반경입니다")
+		return
+	}
+
+	// 카테고리 필터링 (선택사항)
+	var categories []models.InterestCategory
+	if categoriesStr != "" {
+		categoryStrs := strings.Split(categoriesStr, ",")
+		for _, catStr := range categoryStrs {
+			categories = append(categories, models.InterestCategory(strings.TrimSpace(catStr)))
+		}
+	}
+
+	// 서비스 호출
+	signals, err := h.signalService.GetNearbySignals(lat, lon, radius, categories)
+	if err != nil {
+		h.logger.Error("근처 시그널 조회 실패", err)
+		utils.InternalServerErrorResponse(c, "근처 시그널 조회에 실패했습니다", err)
+		return
+	}
+
+	h.logger.Info(fmt.Sprintf("근처 시그널 조회 성공: %d개", len(signals)))
+
+	utils.SuccessResponse(c, "근처 시그널 조회 완료", gin.H{
+		"signals": signals,
+		"count":   len(signals),
+		"center": gin.H{
+			"latitude":  lat,
+			"longitude": lon,
+			"radius":    radius,
+		},
+	})
 }

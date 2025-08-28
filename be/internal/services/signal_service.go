@@ -1,7 +1,10 @@
 package services
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"signal-be/internal/repositories"
@@ -19,7 +22,9 @@ type SignalServiceInterface interface {
 	JoinSignal(signalID, userID uint, req *models.JoinSignalRequest) error
 	LeaveSignal(signalID, userID uint) error
 	ApproveParticipant(signalID, creatorID, userID uint) error
+	RejectParticipant(signalID, creatorID, userID uint) error
 	GetMySignals(userID uint, page, limit int) ([]models.Signal, *utils.Pagination, error)
+	GetNearbySignals(lat, lon, radius float64, categories []models.InterestCategory) ([]models.SignalWithDistance, error)
 }
 
 type SignalService struct {
@@ -98,6 +103,9 @@ func (s *SignalService) CreateSignal(creatorID uint, req *models.CreateSignalReq
 	if err := s.queue.ScheduleSignalExpiration(nil, signal.ID, expiresAt); err != nil {
 		s.logger.Warn(fmt.Sprintf("시그널 만료 스케줄링 실패: %v", err))
 	}
+
+	// 근처 시그널 캐시 무효화
+	go s.invalidateNearbyCache(signal.Latitude, signal.Longitude)
 
 	// 주변 사용자들에게 푸시 알림 발송
 	go s.notifyNearbyUsers(signal)
@@ -239,6 +247,132 @@ func (s *SignalService) GetMySignals(userID uint, page, limit int) ([]models.Sig
 	pagination := utils.CalculatePagination(page, limit, total)
 
 	return signals, &pagination, nil
+}
+
+func (s *SignalService) RejectParticipant(signalID, creatorID, userID uint) error {
+	// 생성자인지 확인
+	signal, err := s.signalRepo.GetByID(signalID)
+	if err != nil {
+		return fmt.Errorf("시그널을 찾을 수 없습니다")
+	}
+
+	if signal.CreatorID != creatorID {
+		return fmt.Errorf("시그널 생성자만 거절할 수 있습니다")
+	}
+
+	if err := s.signalRepo.UpdateParticipantStatus(signalID, userID, models.ParticipantRejected); err != nil {
+		s.logger.Error("참여자 거절 실패", err)
+		return fmt.Errorf("참여자 거절에 실패했습니다")
+	}
+
+	s.logger.Info(fmt.Sprintf("참여자 거절: 시그널 %d, 사용자 %d", signalID, userID))
+
+	return nil
+}
+
+func (s *SignalService) GetNearbySignals(lat, lon, radius float64, categories []models.InterestCategory) ([]models.SignalWithDistance, error) {
+	// 유효성 검사
+	if !utils.IsValidCoordinate(lat, lon) {
+		return nil, fmt.Errorf("유효하지 않은 좌표입니다")
+	}
+
+	if radius <= 0 || radius > 50000 {
+		return nil, fmt.Errorf("반경은 0보다 크고 50km 이하여야 합니다")
+	}
+
+	// Redis 캐시 키 생성 (좌표를 그리드로 반올림하여 캐시 효율성 증대)
+	gridLat := s.roundToGrid(lat, 0.01) // 약 1km 그리드
+	gridLon := s.roundToGrid(lon, 0.01)
+	cacheKey := fmt.Sprintf("nearby_signals:%s:%s:%s", 
+		strconv.FormatFloat(gridLat, 'f', -1, 64),
+		strconv.FormatFloat(gridLon, 'f', -1, 64),
+		strconv.FormatFloat(radius, 'f', -1, 64))
+
+	// Redis에서 캐시된 데이터 조회
+	ctx := context.Background()
+	cachedData, err := s.redisClient.Get(ctx, cacheKey)
+	if err == nil {
+		var cachedSignals []models.SignalWithDistance
+		if err := json.Unmarshal([]byte(cachedData), &cachedSignals); err == nil {
+			s.logger.Info(fmt.Sprintf("Redis 캐시에서 근처 시그널 조회: %d개", len(cachedSignals)))
+			return s.filterSignalsByCategory(cachedSignals, categories), nil
+		}
+	}
+
+	// 캐시 미스 - 데이터베이스에서 조회
+	dbSignals, err := s.signalRepo.GetActiveSignalsInRadius(lat, lon, radius)
+	if err != nil {
+		s.logger.Error("근처 시그널 데이터베이스 조회 실패", err)
+		return nil, fmt.Errorf("근처 시그널 조회에 실패했습니다")
+	}
+
+	var signals []models.SignalWithDistance
+
+	// 거리 계산하여 SignalWithDistance로 변환
+	for _, signal := range dbSignals {
+		distance := utils.CalculateDistance(lat, lon, signal.Latitude, signal.Longitude)
+		signals = append(signals, models.SignalWithDistance{
+			Signal:   signal,
+			Distance: distance,
+		})
+	}
+
+	// Redis에 캐시 저장 (5분 TTL)
+	if signalsJSON, err := json.Marshal(signals); err == nil {
+		s.redisClient.Set(ctx, cacheKey, signalsJSON, 5*time.Minute)
+		s.logger.Info(fmt.Sprintf("근처 시그널을 Redis에 캐시 저장: %d개", len(signals)))
+	}
+
+	return s.filterSignalsByCategory(signals, categories), nil
+}
+
+// roundToGrid rounds coordinates to grid boundaries for cache efficiency
+func (s *SignalService) roundToGrid(coord, gridSize float64) float64 {
+	return float64(int(coord/gridSize)) * gridSize
+}
+
+// filterSignalsByCategory filters signals by categories if provided
+func (s *SignalService) filterSignalsByCategory(signals []models.SignalWithDistance, categories []models.InterestCategory) []models.SignalWithDistance {
+	if len(categories) == 0 {
+		return signals
+	}
+
+	filteredSignals := []models.SignalWithDistance{}
+	categorySet := make(map[models.InterestCategory]bool)
+	for _, cat := range categories {
+		categorySet[cat] = true
+	}
+
+	for _, signal := range signals {
+		if categorySet[signal.Category] {
+			filteredSignals = append(filteredSignals, signal)
+		}
+	}
+	return filteredSignals
+}
+
+// invalidateNearbyCache invalidates nearby signal cache for a location
+func (s *SignalService) invalidateNearbyCache(lat, lon float64) {
+	ctx := context.Background()
+	// 주변 그리드들의 캐시 무효화 (현재 그리드 + 인접 그리드들)
+	gridSize := 0.01
+	for dlat := -1.0; dlat <= 1.0; dlat++ {
+		for dlon := -1.0; dlon <= 1.0; dlon++ {
+			gridLat := s.roundToGrid(lat, gridSize) + dlat*gridSize
+			gridLon := s.roundToGrid(lon, gridSize) + dlon*gridSize
+			
+			// 다양한 반경에 대한 캐시 키들 무효화
+			radiuses := []float64{1000, 3000, 5000, 10000}
+			for _, radius := range radiuses {
+				cacheKey := fmt.Sprintf("nearby_signals:%s:%s:%s",
+					strconv.FormatFloat(gridLat, 'f', -1, 64),
+					strconv.FormatFloat(gridLon, 'f', -1, 64),
+					strconv.FormatFloat(radius, 'f', -1, 64))
+				s.redisClient.Delete(ctx, cacheKey)
+			}
+		}
+	}
+	s.logger.Info("근처 시그널 캐시 무효화 완료")
 }
 
 func (s *SignalService) notifyNearbyUsers(signal *models.Signal) {
