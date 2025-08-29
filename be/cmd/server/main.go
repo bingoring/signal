@@ -55,10 +55,12 @@ func main() {
 	userRepo := repositories.NewUserRepository(db.DB)
 	signalRepo := repositories.NewSignalRepository(db.DB)
 	chatRepo := repositories.NewChatRepository(db.DB)
+	buddyRepo := repositories.NewBuddyRepository(db.DB)
 
 	userService := services.NewUserService(userRepo, jwtManager, appLogger)
 	signalService := services.NewSignalService(signalRepo, userRepo, redisClient, jobQueue, appLogger)
 	chatService := services.NewChatService(chatRepo, signalRepo, redisClient, appLogger)
+	buddyService := services.NewBuddyService(buddyRepo, userRepo, appLogger)
 	websocketService := services.NewWebSocketService(appLogger, redisClient)
 
 	userHandler := handlers.NewUserHandler(userService, appLogger)
@@ -66,8 +68,9 @@ func main() {
 	oauthHandler := handlers.NewOAuthHandler(cfg, userService, appLogger)
 	signalHandler := handlers.NewSignalHandler(signalService, appLogger)
 	chatHandler := handlers.NewChatHandler(chatService, websocketService, appLogger)
+	buddyHandler := handlers.NewBuddyHandler(buddyService, appLogger)
 
-	router := setupRouter(cfg, userHandler, authHandler, oauthHandler, signalHandler, chatHandler, websocketService, jwtManager, appLogger)
+	router := setupRouter(cfg, userHandler, authHandler, oauthHandler, signalHandler, chatHandler, buddyHandler, websocketService, jwtManager, appLogger)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Server.Port,
@@ -106,6 +109,7 @@ func setupRouter(
 	oauthHandler *handlers.OAuthHandler,
 	signalHandler *handlers.SignalHandler,
 	chatHandler *handlers.ChatHandler,
+	buddyHandler *handlers.BuddyHandler,
 	websocketService *services.WebSocketService,
 	jwtManager *utils.JWTManager,
 	appLogger *logger.Logger,
@@ -188,6 +192,30 @@ func setupRouter(
 			{
 				ratings.POST("", userHandler.RateUser)
 				ratings.POST("/report", userHandler.ReportUser)
+			}
+
+			// 단골 관리
+			buddies := authenticated.Group("/buddies")
+			{
+				// 단골 목록 및 통계
+				buddies.GET("", buddyHandler.GetBuddies)
+				buddies.GET("/stats", buddyHandler.GetBuddyStats)
+				buddies.GET("/potential", buddyHandler.GetPotentialBuddies)
+				
+				// 특정 단골 관리
+				buddies.GET("/:buddyId", buddyHandler.GetBuddy)
+				buddies.POST("", buddyHandler.CreateBuddy)
+				buddies.PUT("/:buddyId", buddyHandler.UpdateBuddy)
+				buddies.DELETE("/:buddyId", buddyHandler.DeleteBuddy)
+				
+				// 매너 점수 관리
+				buddies.POST("/manner", buddyHandler.CreateMannerLog)
+				buddies.GET("/manner/logs", buddyHandler.GetMannerLogs)
+				
+				// 단골 초대 관리
+				buddies.POST("/invitations", buddyHandler.CreateBuddyInvitation)
+				buddies.GET("/invitations", buddyHandler.GetBuddyInvitations)
+				buddies.POST("/invitations/:invitationId/respond", buddyHandler.RespondBuddyInvitation)
 			}
 		}
 	}
