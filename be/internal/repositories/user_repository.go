@@ -18,6 +18,7 @@ type UserRepositoryInterface interface {
 	AddPushToken(token *models.PushToken) error
 	GetPushTokens(userID uint) ([]models.PushToken, error)
 	GetUsersInRadius(latitude, longitude, radius float64, excludeUserID uint) ([]models.User, error)
+	GetMatchedUsersForSignal(signal *models.Signal) ([]models.User, error)
 	RateUser(rating *models.UserRating) error
 	ReportUser(report *models.ReportUser) error
 }
@@ -151,6 +152,47 @@ func (r *UserRepository) GetUsersInRadius(latitude, longitude, radius float64, e
 	err := r.db.Preload("Profile").
 		Raw(query, excludeUserID, longitude, latitude, radius).
 		Find(&users).Error
+	
+	return users, err
+}
+
+// GetMatchedUsersForSignal 시그널에 매칭되는 사용자들 조회
+func (r *UserRepository) GetMatchedUsersForSignal(signal *models.Signal) ([]models.User, error) {
+	var users []models.User
+	
+	// 관심사가 같고, 반경 내에 있으며, 연령대가 맞는 사용자들을 찾음
+	query := r.db.Preload("Profile").
+		Joins("JOIN user_profiles ON user_profiles.user_id = users.id").
+		Joins("LEFT JOIN user_interests ON user_interests.user_id = users.id").
+		Joins("LEFT JOIN user_locations ON user_locations.user_id = users.id").
+		Where("users.is_active = ?", true).
+		Where("users.id != ?", signal.CreatorID). // 생성자 제외
+		Where("user_interests.category = ?", signal.Category)
+
+	// 연령대 필터링
+	if signal.MinAge > 0 && signal.MaxAge > 0 {
+		query = query.Where("user_profiles.age BETWEEN ? AND ?", signal.MinAge, signal.MaxAge)
+	}
+
+	// 성별 필터링
+	if signal.GenderPreference != "" && signal.GenderPreference != "any" {
+		query = query.Where("user_profiles.gender = ?", signal.GenderPreference)
+	}
+
+	// 위치 기반 필터링 (10km 반경)
+	query = query.Where(`
+		ST_DWithin(
+			ST_SetSRID(ST_MakePoint(user_locations.longitude, user_locations.latitude), 4326)::geography,
+			ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
+			10000
+		)
+	`, signal.Longitude, signal.Latitude)
+
+	// 매너 점수가 30점 이상인 사용자만
+	query = query.Where("user_profiles.manner_score >= ?", 30.0)
+
+	// 최대 50명까지만 알림
+	err := query.Limit(50).Find(&users).Error
 	
 	return users, err
 }

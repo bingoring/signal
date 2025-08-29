@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"fmt"
 	"time"
 
 	"signal-module/pkg/models"
@@ -22,6 +23,14 @@ type SignalRepositoryInterface interface {
 	GetParticipants(signalID uint) ([]models.SignalParticipant, error)
 	GetExpiredSignals() ([]models.Signal, error)
 	GetActiveSignalsInRadius(latitude, longitude, radius float64) ([]models.Signal, error)
+	
+	// Sprint 2에서 추가된 메서드들
+	GetDailySignalCount(userID uint, date time.Time) (int64, error)
+	CheckDuplicateSignal(userID uint, lat, lon float64, scheduledAt time.Time) (bool, error)
+	GetDailyJoinCount(userID uint, date time.Time) (int64, error)
+	CreateWithTransaction(fn func(tx interface{}) error) error
+	CreateTx(tx interface{}, signal *models.Signal) error
+	CreateParticipantTx(tx interface{}, participant *models.SignalParticipant) error
 }
 
 type SignalRepository struct {
@@ -305,4 +314,82 @@ func (r *SignalRepository) GetActiveSignalsInRadius(latitude, longitude, radius 
 		Find(&signals).Error
 	
 	return signals, err
+}
+
+// GetDailySignalCount 일일 시그널 생성 개수 조회
+func (r *SignalRepository) GetDailySignalCount(userID uint, date time.Time) (int64, error) {
+	var count int64
+	
+	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+	endOfDay := startOfDay.Add(24 * time.Hour)
+	
+	err := r.db.Model(&models.Signal{}).
+		Where("creator_id = ? AND created_at >= ? AND created_at < ?", userID, startOfDay, endOfDay).
+		Count(&count).Error
+		
+	return count, err
+}
+
+// CheckDuplicateSignal 중복 시그널 확인 (같은 사용자, 비슷한 위치, 비슷한 시간)
+func (r *SignalRepository) CheckDuplicateSignal(userID uint, lat, lon float64, scheduledAt time.Time) (bool, error) {
+	var count int64
+	
+	// 30분 전후, 반경 500m 내에서 중복 확인
+	timeBuffer := 30 * time.Minute
+	startTime := scheduledAt.Add(-timeBuffer)
+	endTime := scheduledAt.Add(timeBuffer)
+	
+	// 대략적인 거리 계산을 위한 위도/경도 범위
+	latBuffer := 500.0 / 111320.0 // 약 0.0045도
+	lonBuffer := 500.0 / 111320.0
+	
+	err := r.db.Model(&models.Signal{}).
+		Where("creator_id = ?", userID).
+		Where("scheduled_at BETWEEN ? AND ?", startTime, endTime).
+		Where("latitude BETWEEN ? AND ?", lat-latBuffer, lat+latBuffer).
+		Where("longitude BETWEEN ? AND ?", lon-lonBuffer, lon+lonBuffer).
+		Where("status IN ?", []string{string(models.SignalActive), string(models.SignalFull)}).
+		Count(&count).Error
+		
+	return count > 0, err
+}
+
+// GetDailyJoinCount 일일 시그널 참여 개수 조회
+func (r *SignalRepository) GetDailyJoinCount(userID uint, date time.Time) (int64, error) {
+	var count int64
+	
+	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+	endOfDay := startOfDay.Add(24 * time.Hour)
+	
+	err := r.db.Model(&models.SignalParticipant{}).
+		Where("user_id = ? AND created_at >= ? AND created_at < ?", userID, startOfDay, endOfDay).
+		Where("status IN ?", []string{string(models.ParticipantPending), string(models.ParticipantApproved)}).
+		Count(&count).Error
+		
+	return count, err
+}
+
+// CreateWithTransaction 트랜잭션으로 시그널 생성
+func (r *SignalRepository) CreateWithTransaction(fn func(tx interface{}) error) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		return fn(tx)
+	})
+}
+
+// CreateTx 트랜잭션 내에서 시그널 생성
+func (r *SignalRepository) CreateTx(tx interface{}, signal *models.Signal) error {
+	gormTx, ok := tx.(*gorm.DB)
+	if !ok {
+		return fmt.Errorf("invalid transaction type")
+	}
+	return gormTx.Create(signal).Error
+}
+
+// CreateParticipantTx 트랜잭션 내에서 참여자 생성
+func (r *SignalRepository) CreateParticipantTx(tx interface{}, participant *models.SignalParticipant) error {
+	gormTx, ok := tx.(*gorm.DB)
+	if !ok {
+		return fmt.Errorf("invalid transaction type")
+	}
+	return gormTx.Create(participant).Error
 }
