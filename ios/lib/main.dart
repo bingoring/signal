@@ -4,6 +4,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 
 import 'app/app.dart';
 import 'core/di/injection_container.dart' as di;
+import 'features/buddy/presentation/cubit/buddy_cubit.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,7 +25,9 @@ class SignalApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiBlocProvider(
       providers: [
-        // BLoC 프로바이더들이 여기에 추가됩니다
+        BlocProvider<BuddyCubit>(
+          create: (context) => di.sl<BuddyCubit>(),
+        ),
       ],
       child: MaterialApp.router(
         title: 'Signal',

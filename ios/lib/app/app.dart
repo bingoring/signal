@@ -7,6 +7,9 @@ import '../features/signal/presentation/pages/create_signal_page.dart';
 import '../features/signal/presentation/pages/signal_detail_page.dart';
 import '../features/chat/presentation/pages/chat_room_page.dart';
 import '../features/profile/presentation/pages/profile_page.dart';
+import '../features/buddy/presentation/pages/buddy_list_page.dart';
+import '../features/buddy/presentation/pages/potential_buddies_page.dart';
+import '../features/buddy/presentation/pages/manner_evaluation_page.dart';
 
 class AppRouter {
   static final GoRouter router = GoRouter(
@@ -48,6 +51,28 @@ class AppRouter {
       GoRoute(
         path: '/profile',
         builder: (context, state) => const ProfilePage(),
+      ),
+      
+      // Buddy Routes
+      GoRoute(
+        path: '/buddies',
+        builder: (context, state) => const BuddyListPage(),
+      ),
+      GoRoute(
+        path: '/potential-buddies',
+        builder: (context, state) => const PotentialBuddiesPage(),
+      ),
+      GoRoute(
+        path: '/manner-evaluation',
+        builder: (context, state) {
+          final extra = state.extra as Map<String, dynamic>;
+          return MannerEvaluationPage(
+            rateeId: extra['rateeId'],
+            rateeName: extra['rateeName'],
+            signalId: extra['signalId'],
+            signalTitle: extra['signalTitle'],
+          );
+        },
       ),
     ],
   );

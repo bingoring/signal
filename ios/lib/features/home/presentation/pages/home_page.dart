@@ -12,6 +12,9 @@ import '../../signal/data/models/signal_model.dart';
 import '../../signal/data/services/websocket_service.dart';
 import '../../signal/presentation/widgets/signal_detail_sheet.dart';
 
+// Buddy related imports
+import '../../buddy/presentation/pages/buddy_list_page.dart';
+
 // Core services and widgets
 import '../../../core/services/location_service.dart';
 import '../../../core/widgets/location_permission_dialog.dart';
@@ -48,6 +51,7 @@ class _HomePageState extends State<HomePage> {
         onLocationChanged: _onLocationChanged,
       ),
       const SignalListView(),
+      const BuddyListPage(),
       const ChatListView(),
       const ProfileView(),
     ];
@@ -153,6 +157,10 @@ class _HomePageState extends State<HomePage> {
           BottomNavigationBarItem(
             icon: Icon(Icons.signal_cellular_alt),
             label: '시그널',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.people),
+            label: '단골',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.chat_bubble),
