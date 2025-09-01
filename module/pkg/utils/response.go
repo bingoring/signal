@@ -2,6 +2,7 @@ package utils
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -123,4 +124,14 @@ func CalculateOffset(page, limit int) int {
 		page = 1
 	}
 	return (page - 1) * limit
+}
+
+// ParseIntQuery parses query parameter as integer with default value
+func ParseIntQuery(c *gin.Context, key string, defaultValue int) int {
+	if value := c.Query(key); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			return parsed
+		}
+	}
+	return defaultValue
 }

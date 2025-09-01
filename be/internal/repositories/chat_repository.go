@@ -10,6 +10,7 @@ import (
 
 type ChatRepositoryInterface interface {
 	CreateChatRoom(room *models.ChatRoom) error
+	GetChatRoomByID(chatRoomID uint) (*models.ChatRoom, error)
 	GetChatRoomBySignalID(signalID uint) (*models.ChatRoom, error)
 	GetChatRoomsByUserID(userID uint) ([]models.ChatRoomInfo, error)
 	SendMessage(message *models.ChatMessage) error
@@ -29,6 +30,17 @@ func NewChatRepository(db *gorm.DB) ChatRepositoryInterface {
 
 func (r *ChatRepository) CreateChatRoom(room *models.ChatRoom) error {
 	return r.db.Create(room).Error
+}
+
+func (r *ChatRepository) GetChatRoomByID(chatRoomID uint) (*models.ChatRoom, error) {
+	var room models.ChatRoom
+	err := r.db.Preload("Signal").
+		Where("id = ?", chatRoomID).
+		First(&room).Error
+	if err != nil {
+		return nil, err
+	}
+	return &room, nil
 }
 
 func (r *ChatRepository) GetChatRoomBySignalID(signalID uint) (*models.ChatRoom, error) {

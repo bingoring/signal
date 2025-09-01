@@ -21,6 +21,7 @@ type SignalRepositoryInterface interface {
 	LeaveSignal(signalID, userID uint) error
 	UpdateParticipantStatus(signalID, userID uint, status models.ParticipantStatus) error
 	GetParticipants(signalID uint) ([]models.SignalParticipant, error)
+	IsUserParticipant(signalID, userID uint, status models.ParticipantStatus) (bool, error)
 	GetExpiredSignals() ([]models.Signal, error)
 	GetActiveSignalsInRadius(latitude, longitude, radius float64) ([]models.Signal, error)
 	
@@ -287,6 +288,15 @@ func (r *SignalRepository) GetParticipants(signalID uint) ([]models.SignalPartic
 		Where("signal_id = ?", signalID).
 		Find(&participants).Error
 	return participants, err
+}
+
+func (r *SignalRepository) IsUserParticipant(signalID, userID uint, status models.ParticipantStatus) (bool, error) {
+	var count int64
+	err := r.db.Model(&models.SignalParticipant{}).
+		Where("signal_id = ? AND user_id = ? AND status = ?", signalID, userID, status).
+		Count(&count).Error
+	
+	return count > 0, err
 }
 
 func (r *SignalRepository) GetExpiredSignals() ([]models.Signal, error) {

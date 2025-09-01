@@ -42,13 +42,18 @@ func NewSignalService(
 	queue *queue.Queue,
 	logger *logger.Logger,
 ) SignalServiceInterface {
-	return &SignalService{
+	service := &SignalService{
 		signalRepo:  signalRepo,
 		userRepo:    userRepo,
 		redisClient: redisClient,
 		queue:       queue,
 		logger:      logger,
 	}
+	
+	// 서비스 시작 시 활성 시그널들을 캐시에 로드
+	go service.initializeSignalCache()
+	
+	return service
 }
 
 func (s *SignalService) CreateSignal(creatorID uint, req *models.CreateSignalRequest) (*models.Signal, error) {

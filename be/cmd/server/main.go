@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -62,12 +63,14 @@ func main() {
 	chatService := services.NewChatService(chatRepo, signalRepo, redisClient, appLogger)
 	buddyService := services.NewBuddyService(buddyRepo, userRepo, appLogger)
 	websocketService := services.NewWebSocketService(appLogger, redisClient)
+	stdLogger := log.New(os.Stdout, "[CHAT-WS] ", log.LstdFlags)
+	chatWebSocketService := services.NewChatWebSocketService(db.DB, stdLogger)
 
 	userHandler := handlers.NewUserHandler(userService, appLogger)
 	authHandler := handlers.NewAuthHandler(userService, appLogger)
 	oauthHandler := handlers.NewOAuthHandler(cfg, userService, appLogger)
 	signalHandler := handlers.NewSignalHandler(signalService, appLogger)
-	chatHandler := handlers.NewChatHandler(chatService, websocketService, appLogger)
+	chatHandler := handlers.NewChatHandler(chatService, chatWebSocketService, appLogger)
 	buddyHandler := handlers.NewBuddyHandler(buddyService, appLogger)
 
 	router := setupRouter(cfg, userHandler, authHandler, oauthHandler, signalHandler, chatHandler, buddyHandler, websocketService, jwtManager, appLogger)
@@ -182,8 +185,11 @@ func setupRouter(
 			chat := authenticated.Group("/chat")
 			{
 				chat.GET("/rooms", chatHandler.GetChatRooms)
+				chat.GET("/rooms/:id", chatHandler.GetChatRoom)
 				chat.GET("/rooms/:id/messages", chatHandler.GetMessages)
 				chat.POST("/rooms/:id/messages", chatHandler.SendMessage)
+				chat.POST("/rooms/:id/join", chatHandler.JoinChatRoom)
+				chat.POST("/signals/:signal_id/room", chatHandler.CreateChatRoom)
 				chat.GET("/ws/:room_id", chatHandler.HandleWebSocket)
 			}
 
