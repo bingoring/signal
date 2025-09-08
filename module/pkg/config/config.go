@@ -16,6 +16,7 @@ type Config struct {
 	Push     PushConfig
 	Location LocationConfig
 	OAuth    OAuthConfig
+	SMTP     SMTPConfig
 }
 
 type DatabaseConfig struct {
@@ -66,6 +67,15 @@ type GoogleConfig struct {
 	RedirectURL  string
 }
 
+type SMTPConfig struct {
+	Host      string
+	Port      string
+	Username  string
+	Password  string
+	FromEmail string
+	FromName  string
+}
+
 func LoadConfig() *Config {
 	if err := godotenv.Load(); err != nil {
 		log.Println("⚠️ .env 파일을 찾을 수 없습니다. 환경변수를 사용합니다.")
@@ -112,6 +122,14 @@ func LoadConfig() *Config {
 				ClientSecret: getEnv("GOOGLE_CLIENT_SECRET", ""),
 				RedirectURL:  getEnv("GOOGLE_REDIRECT_URL", "http://localhost:8080/api/v1/auth/google/callback"),
 			},
+		},
+		SMTP: SMTPConfig{
+			Host:      getEnv("SMTP_HOST", "smtp.gmail.com"),
+			Port:      getEnv("SMTP_PORT", "587"),
+			Username:  getEnv("SMTP_USERNAME", ""),
+			Password:  getEnv("SMTP_PASSWORD", ""),
+			FromEmail: getEnv("SMTP_FROM_EMAIL", "noreply@signal.app"),
+			FromName:  getEnv("SMTP_FROM_NAME", "Signal"),
 		},
 	}
 }

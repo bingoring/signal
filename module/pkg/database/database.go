@@ -63,6 +63,7 @@ func (d *Database) Migrate() error {
 		&models.UserRating{},
 		&models.ReportUser{},
 		&models.PushToken{},
+		&models.AuthToken{},
 	)
 	
 	if err != nil {
@@ -99,6 +100,10 @@ func (d *Database) createIndexes() error {
 		// 푸시 토큰 인덱스
 		`CREATE INDEX IF NOT EXISTS idx_push_tokens_active 
 		 ON push_tokens (user_id, is_active)`,
+		
+		// Auth 토큰 인덱스
+		`CREATE INDEX IF NOT EXISTS idx_auth_tokens_lookup 
+		 ON auth_tokens (email, used, expires_at)`,
 	}
 
 	for _, indexSQL := range indexes {
