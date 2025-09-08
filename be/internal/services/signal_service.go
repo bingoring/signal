@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"signal-be/internal/repositories"
@@ -28,11 +29,12 @@ type SignalServiceInterface interface {
 }
 
 type SignalService struct {
-	signalRepo repositories.SignalRepositoryInterface
-	userRepo   repositories.UserRepositoryInterface
-	redisClient *redis.Client
-	queue      *queue.Queue
-	logger     *logger.Logger
+	signalRepo      repositories.SignalRepositoryInterface
+	userRepo        repositories.UserRepositoryInterface
+	redisClient     *redis.Client
+	queue           *queue.Queue
+	logger          *logger.Logger
+	websocketService *WebSocketService
 }
 
 func NewSignalService(
@@ -41,13 +43,15 @@ func NewSignalService(
 	redisClient *redis.Client,
 	queue *queue.Queue,
 	logger *logger.Logger,
+	websocketService *WebSocketService,
 ) SignalServiceInterface {
 	service := &SignalService{
-		signalRepo:  signalRepo,
-		userRepo:    userRepo,
-		redisClient: redisClient,
-		queue:       queue,
-		logger:      logger,
+		signalRepo:       signalRepo,
+		userRepo:         userRepo,
+		redisClient:      redisClient,
+		queue:            queue,
+		logger:           logger,
+		websocketService: websocketService,
 	}
 	
 	// 서비스 시작 시 활성 시그널들을 캐시에 로드
@@ -186,10 +190,18 @@ func (s *SignalService) CreateSignal(creatorID uint, req *models.CreateSignalReq
 		}
 	}()
 
-	// 12. 근처 시그널 캐시 무효화
+	// 12. Redis GEO 캐시에 추가
+	if err := s.AddSignalToGeoCache(*signal); err != nil {
+		s.logger.Error("시그널 GEO 캐시 추가 실패", err)
+	}
+
+	// 13. 근처 시그널 캐시 무효화 (주변 위치의 캐시들)
 	go s.invalidateNearbyCache(signal.Latitude, signal.Longitude)
 
-	// 13. 주변 사용자들에게 푸시 알림 발송 (매칭 기반)
+	// 14. 실시간 시그널 업데이트 브로드캐스트
+	go s.broadcastSignalUpdate(signal, "new_signal")
+
+	// 15. 주변 사용자들에게 푸시 알림 발송 (매칭 기반)
 	go s.notifyMatchedUsers(signal)
 
 	s.logger.LogSignalCreated(ctx, signal.ID, creatorID)
@@ -349,6 +361,9 @@ func (s *SignalService) JoinSignal(signalID, userID uint, req *models.JoinSignal
 		}
 	}()
 
+	// 시그널 참여자 변경 실시간 알림
+	go s.NotifySignalParticipantChange(signalID)
+
 	s.logger.LogSignalJoined(ctx, signalID, userID)
 
 	return nil
@@ -380,6 +395,9 @@ func (s *SignalService) ApproveParticipant(signalID, creatorID, userID uint) err
 		s.logger.Error("참여자 승인 실패", err)
 		return fmt.Errorf("참여자 승인에 실패했습니다")
 	}
+
+	// 시그널 참여자 변경 실시간 알림
+	go s.NotifySignalParticipantChange(signalID)
 
 	s.logger.Info(fmt.Sprintf("참여자 승인: 시그널 %d, 사용자 %d", signalID, userID))
 
@@ -723,5 +741,214 @@ func (s *SignalService) notifyNearbyUsers(signal *models.Signal) {
 	// 푸시 알림 큐에 추가
 	if err := s.queue.PushNotification(nil, userIDs, title, body, data); err != nil {
 		s.logger.Error("푸시 알림 큐 추가 실패", err)
+	}
+}
+
+// initializeSignalCache 서버 시작 시 활성 시그널들을 Redis GEO에 캐시
+func (s *SignalService) initializeSignalCache() {
+	ctx := context.Background()
+	
+	s.logger.Info("활성 시그널 Redis GEO 캐시 초기화 시작")
+	
+	// 기존 캐시 삭제
+	s.redisClient.Delete(ctx, "active_signals:geo")
+	
+	// 모든 활성 시그널 조회 (전체 영역)
+	signals, err := s.signalRepo.GetActiveSignalsInRadius(0, 0, 99999999) // 매우 큰 반경으로 모든 시그널 조회
+	if err != nil {
+		s.logger.Error("활성 시그널 조회 실패", err)
+		return
+	}
+	
+	// Redis GEO에 저장
+	for _, signal := range signals {
+		err := s.AddSignalToGeoCache(signal)
+		if err != nil {
+			s.logger.Error(fmt.Sprintf("시그널 %d GEO 캐시 추가 실패", signal.ID), err)
+			continue
+		}
+	}
+	
+	s.logger.Info(fmt.Sprintf("활성 시그널 %d개 Redis GEO 캐시 초기화 완료", len(signals)))
+}
+
+// AddSignalToGeoCache 시그널을 Redis GEO 캐시에 추가
+func (s *SignalService) AddSignalToGeoCache(signal models.Signal) error {
+	ctx := context.Background()
+	
+	// 기존의 AddActiveSignal 메서드 사용
+	err := s.redisClient.AddActiveSignal(ctx, signal.ID, signal.Latitude, signal.Longitude)
+	if err != nil {
+		return err
+	}
+	
+	// 시그널 상세 정보도 별도 캐싱 (5분 TTL)
+	signalKey := fmt.Sprintf("signal:%d:details", signal.ID)
+	signalJSON, err := json.Marshal(signal)
+	if err != nil {
+		return err
+	}
+	
+	return s.redisClient.Set(ctx, signalKey, signalJSON, 5*time.Minute)
+}
+
+// RemoveSignalFromGeoCache 시그널을 Redis GEO 캐시에서 제거
+func (s *SignalService) RemoveSignalFromGeoCache(signalID uint) error {
+	ctx := context.Background()
+	
+	// RemoveActiveSignal 메서드 사용
+	err := s.redisClient.RemoveActiveSignal(ctx, signalID)
+	if err != nil {
+		return err
+	}
+	
+	// 시그널 상세 정보 캐시도 삭제
+	signalKey := fmt.Sprintf("signal:%d:details", signalID)
+	return s.redisClient.Delete(ctx, signalKey)
+}
+
+// GetNearbySignalsFromGeoCache Redis GEO를 사용하여 근처 시그널들을 빠르게 조회
+func (s *SignalService) GetNearbySignalsFromGeoCache(lat, lon, radius float64) ([]models.Signal, error) {
+	ctx := context.Background()
+	
+	// FindNearbySignals 메서드 사용
+	results, err := s.redisClient.FindNearbySignals(ctx, lon, lat, radius)
+	if err != nil {
+		return nil, err
+	}
+	
+	var signals []models.Signal
+	
+	// 각 시그널의 상세 정보를 캐시에서 조회
+	for _, result := range results {
+		signalKey := fmt.Sprintf("%s:details", result.Name)
+		
+		signalData, err := s.redisClient.Get(ctx, signalKey)
+		if err != nil {
+			// 캐시 미스 시 데이터베이스에서 조회
+			signalIDStr := strings.TrimPrefix(result.Name, "signal:")
+			signalID, parseErr := strconv.ParseUint(signalIDStr, 10, 32)
+			if parseErr != nil {
+				continue
+			}
+			
+			signal, dbErr := s.signalRepo.GetByID(uint(signalID))
+			if dbErr != nil {
+				continue
+			}
+			
+			// 다시 캐시에 저장
+			s.AddSignalToGeoCache(*signal)
+			signals = append(signals, *signal)
+		} else {
+			var signal models.Signal
+			if json.Unmarshal([]byte(signalData), &signal) == nil {
+				signals = append(signals, signal)
+			}
+		}
+	}
+	
+	return signals, nil
+}
+
+// CacheActiveSignals 모든 활성 시그널들을 Redis GEO에 캐시
+func (s *SignalService) CacheActiveSignals() error {
+	ctx := context.Background()
+	key := "active_signals:geo"
+	
+	s.logger.Info("활성 시그널 Redis GEO 캐시 업데이트 시작")
+	
+	// 기존 캐시 삭제
+	s.redisClient.Delete(ctx, key)
+	
+	// 활성 시그널들 조회
+	signals, err := s.signalRepo.GetActiveSignalsInRadius(0, 0, 99999999) // 전체 조회
+	if err != nil {
+		return err
+	}
+	
+	// Redis GEO에 저장
+	for _, signal := range signals {
+		err := s.redisClient.AddActiveSignal(ctx, signal.ID, signal.Latitude, signal.Longitude)
+		if err != nil {
+			s.logger.Error(fmt.Sprintf("시그널 %d GEO 추가 실패", signal.ID), err)
+			continue
+		}
+		
+		// 시그널 상세 정보도 별도 캐싱
+		signalKey := fmt.Sprintf("signal:%d:details", signal.ID)
+		if signalJSON, jsonErr := json.Marshal(signal); jsonErr == nil {
+			s.redisClient.Set(ctx, signalKey, signalJSON, 5*time.Minute)
+		}
+	}
+	
+	s.logger.Info(fmt.Sprintf("활성 시그널 %d개 Redis GEO 캐시 업데이트 완료", len(signals)))
+	
+	return nil
+}
+
+// broadcastSignalUpdate 시그널 생성/업데이트/삭제 시 실시간 브로드캐스트
+func (s *SignalService) broadcastSignalUpdate(signal *models.Signal, updateType string) {
+	if s.websocketService == nil {
+		return
+	}
+
+	// SignalWithDistance로 변환 (거리는 0으로 설정)
+	signalWithDistance := &models.SignalWithDistance{
+		Signal:   *signal,
+		Distance: 0, // 브로드캐스트에서는 거리 계산 불필요
+	}
+
+	// WebSocket을 통해 브로드캐스트
+	s.websocketService.BroadcastSignalUpdate(signalWithDistance, updateType)
+	
+	s.logger.Info(fmt.Sprintf("시그널 %d 실시간 업데이트 브로드캐스트: %s", signal.ID, updateType))
+}
+
+// BroadcastSignalStatusUpdate 시그널 상태 변경 시 실시간 브로드캐스트
+func (s *SignalService) BroadcastSignalStatusUpdate(signalID uint, status models.SignalStatus) {
+	signal, err := s.signalRepo.GetByID(signalID)
+	if err != nil {
+		s.logger.Error("시그널 상태 브로드캐스트용 조회 실패", err)
+		return
+	}
+
+	var updateType string
+	switch status {
+	case models.SignalFull:
+		updateType = "signal_full"
+	case models.SignalClosed:
+		updateType = "signal_closed"
+	case models.SignalCancelled:
+		updateType = "signal_cancelled"
+	case models.SignalCompleted:
+		updateType = "signal_completed"
+	default:
+		updateType = "signal_updated"
+	}
+
+	s.broadcastSignalUpdate(signal, updateType)
+	
+	// Redis GEO에서 제거 (비활성 상태가 된 경우)
+	if status != models.SignalActive {
+		go s.RemoveSignalFromGeoCache(signalID)
+	}
+}
+
+// NotifySignalParticipantChange 시그널 참여자 변경 시 실시간 알림
+func (s *SignalService) NotifySignalParticipantChange(signalID uint) {
+	signal, err := s.signalRepo.GetByID(signalID)
+	if err != nil {
+		s.logger.Error("시그널 참여자 변경 브로드캐스트용 조회 실패", err)
+		return
+	}
+
+	// 정원이 찬 경우 별도 처리
+	if signal.CurrentParticipants >= signal.MaxParticipants {
+		signal.Status = models.SignalFull
+		s.signalRepo.Update(signal)
+		s.BroadcastSignalStatusUpdate(signalID, models.SignalFull)
+	} else {
+		s.broadcastSignalUpdate(signal, "signal_updated")
 	}
 }

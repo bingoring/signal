@@ -58,16 +58,30 @@ func main() {
 	chatRepo := repositories.NewChatRepository(db.DB)
 	buddyRepo := repositories.NewBuddyRepository(db.DB)
 
+	websocketService := services.NewWebSocketService(appLogger, redisClient)
+
 	userService := services.NewUserService(userRepo, jwtManager, appLogger)
-	signalService := services.NewSignalService(signalRepo, userRepo, redisClient, jobQueue, appLogger)
+	signalService := services.NewSignalService(signalRepo, userRepo, redisClient, jobQueue, appLogger, websocketService)
 	chatService := services.NewChatService(chatRepo, signalRepo, redisClient, appLogger)
 	buddyService := services.NewBuddyService(buddyRepo, userRepo, appLogger)
-	websocketService := services.NewWebSocketService(appLogger, redisClient)
 	stdLogger := log.New(os.Stdout, "[CHAT-WS] ", log.LstdFlags)
 	chatWebSocketService := services.NewChatWebSocketService(db.DB, stdLogger)
 
+	// Email service for magic links
+	emailService := services.NewEmailService(
+		cfg.SMTP.Host,
+		cfg.SMTP.Port,
+		cfg.SMTP.Username,
+		cfg.SMTP.Password,
+		cfg.SMTP.FromEmail,
+		cfg.SMTP.FromName,
+	)
+	
+	// Auth service with magic link support
+	authService := services.NewAuthService(db.DB, emailService, cfg.JWT.Secret, cfg.Server.FrontendURL)
+
 	userHandler := handlers.NewUserHandler(userService, appLogger)
-	authHandler := handlers.NewAuthHandler(userService, appLogger)
+	authHandler := handlers.NewAuthHandler(userService, authService, appLogger)
 	oauthHandler := handlers.NewOAuthHandler(cfg, userService, appLogger)
 	signalHandler := handlers.NewSignalHandler(signalService, appLogger)
 	chatHandler := handlers.NewChatHandler(chatService, chatWebSocketService, appLogger)
@@ -145,6 +159,10 @@ func setupRouter(
 			auth.POST("/login", authHandler.Login)
 			auth.POST("/refresh", authHandler.RefreshToken)
 			
+			// Magic Link Authentication
+			auth.POST("/magic-link", authHandler.SendMagicLink)
+			auth.GET("/verify", authHandler.VerifyMagicLink)
+			
 			// OAuth 로그인
 			auth.GET("/:provider/login", oauthHandler.StartOAuthLogin)
 			auth.GET("/:provider/callback", oauthHandler.OAuthCallback)
@@ -155,6 +173,13 @@ func setupRouter(
 		authenticated := api.Group("")
 		authenticated.Use(authMiddleware.RequireAuth())
 		{
+			// 인증 관리 (인증 필요)
+			authSecure := authenticated.Group("/auth")
+			{
+				authSecure.GET("/profile", authHandler.GetProfile)
+				authSecure.POST("/logout", authHandler.Logout)
+			}
+
 			// 사용자 관리
 			user := authenticated.Group("/user")
 			{

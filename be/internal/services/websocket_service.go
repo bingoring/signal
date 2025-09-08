@@ -42,9 +42,13 @@ type LocationBounds struct {
 }
 
 type SignalUpdate struct {
-	Type    string                   `json:"type"`
+	Type    string                   `json:"type"` // "new_signal", "signal_updated", "signal_deleted", "signal_full"
 	Signal  *models.SignalWithDistance `json:"signal,omitempty"`
 	Message string                   `json:"message,omitempty"`
+	Location struct {
+		Latitude  float64 `json:"latitude"`
+		Longitude float64 `json:"longitude"`
+	} `json:"location,omitempty"`
 }
 
 func NewWebSocketService(logger *logger.Logger, redisClient *redis.Client) *WebSocketService {
