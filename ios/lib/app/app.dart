@@ -1,7 +1,8 @@
 import 'package:go_router/go_router.dart';
 
-import '../features/auth/presentation/pages/login_page.dart';
-import '../features/auth/presentation/pages/register_page.dart';
+import '../features/auth/presentation/pages/auth_wrapper.dart';
+import '../features/auth/presentation/pages/magic_link_page.dart';
+import '../features/auth/presentation/pages/welcome_page.dart';
 import '../features/home/presentation/pages/home_page.dart';
 import '../features/signal/presentation/pages/create_signal_page.dart';
 import '../features/signal/presentation/pages/signal_detail_page.dart';
@@ -13,16 +14,29 @@ import '../features/buddy/presentation/pages/manner_evaluation_page.dart';
 
 class AppRouter {
   static final GoRouter router = GoRouter(
-    initialLocation: '/login',
+    initialLocation: '/',
     routes: [
+      // Root Route - Auth Wrapper
+      GoRoute(
+        path: '/',
+        builder: (context, state) => const AuthWrapper(),
+      ),
+      
       // Auth Routes
       GoRoute(
-        path: '/login',
-        builder: (context, state) => const LoginPage(),
+        path: '/auth/magic-link',
+        builder: (context, state) => const MagicLinkPage(),
       ),
       GoRoute(
-        path: '/register',
-        builder: (context, state) => const RegisterPage(),
+        path: '/auth/welcome',
+        builder: (context, state) => const WelcomePage(),
+      ),
+      GoRoute(
+        path: '/auth/verify',
+        redirect: (context, state) {
+          // Handle deep link verification - redirect to root and let AuthWrapper handle it
+          return '/';
+        },
       ),
       
       // Main Routes
