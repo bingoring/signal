@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Signal</string>
+    <string name="auth_loading">Signal 로딩 중...</string>
+    <string name="email_placeholder">이메일 주소를 입력하세요</string>
+    <string name="send_magic_link">로그인 링크 받기</string>
+    <string name="welcome_title">환영합니다!</string>
+    <string name="welcome_subtitle">Signal 가족이 되신 것을 축하합니다!</string>
+    <string name="continue_to_app">Signal 시작하기</string>
+</resources>

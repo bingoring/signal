@@ -4,7 +4,8 @@ import androidx.compose.runtime.Composable
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import com.signal.app.ui.screens.auth.LoginScreen
+import com.signal.app.features.auth.presentation.composables.AuthWrapper
+import com.signal.app.features.auth.presentation.composables.WelcomeScreen
 import com.signal.app.ui.screens.home.HomeScreen
 import com.signal.app.ui.screens.signal.CreateSignalScreen
 
@@ -12,11 +13,30 @@ import com.signal.app.ui.screens.signal.CreateSignalScreen
 fun SignalNavigation(navController: NavHostController) {
     NavHost(
         navController = navController,
-        startDestination = "login"
+        startDestination = "auth"
     ) {
-        // Auth
-        composable("login") {
-            LoginScreen(navController = navController)
+        // Authentication flow
+        composable("auth") {
+            AuthWrapper(
+                navigateToHome = {
+                    navController.navigate("home") {
+                        popUpTo("auth") { inclusive = true }
+                    }
+                },
+                navigateToWelcome = {
+                    navController.navigate("welcome")
+                }
+            )
+        }
+
+        composable("welcome") {
+            WelcomeScreen(
+                onContinueToApp = {
+                    navController.navigate("home") {
+                        popUpTo("welcome") { inclusive = true }
+                    }
+                }
+            )
         }
         
         // Main
