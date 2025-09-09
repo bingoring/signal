@@ -5,7 +5,7 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 /**
- * Signal 데이터 모델 - Flutter SignalModel과 동일한 구조
+ * Enhanced Signal 데이터 모델 - iOS SignalModel과 동일한 구조
  */
 data class Signal(
     val id: Int,
@@ -15,41 +15,48 @@ data class Signal(
     val latitude: Double,
     val longitude: Double,
     val address: String,
+    @SerializedName("place_name")
+    val placeName: String?,
+    @SerializedName("scheduled_at")
+    val scheduledAt: String, // ISO 8601 format
+    @SerializedName("expires_at")
+    val expiresAt: String, // ISO 8601 format
     @SerializedName("max_participants")
     val maxParticipants: Int,
     @SerializedName("current_participants")
     val currentParticipants: Int,
-    @SerializedName("scheduled_time")
-    val scheduledTime: String?, // ISO 8601 format
-    @SerializedName("is_private")
-    val isPrivate: Boolean,
-    val status: SignalStatus,
-    val tags: List<String>,
-    @SerializedName("creator_id")
-    val creatorId: Int,
-    @SerializedName("creator_name")
-    val creatorName: String,
+    @SerializedName("min_age")
+    val minAge: Int?,
+    @SerializedName("max_age")
+    val maxAge: Int?,
+    @SerializedName("allow_instant_join")
+    val allowInstantJoin: Boolean,
+    @SerializedName("require_approval")
+    val requireApproval: Boolean,
+    @SerializedName("gender_preference")
+    val genderPreference: String?,
+    val status: String,
     @SerializedName("created_at")
     val createdAt: String, // ISO 8601 format
     @SerializedName("updated_at")
     val updatedAt: String, // ISO 8601 format
-    @SerializedName("expires_at")
-    val expiresAt: String? = null // ISO 8601 format
+    val creator: UserModel,
+    val distance: Double? = null // 미터 단위
 ) {
     /**
      * 예약된 시간이 있는지 확인
      */
-    fun hasScheduledTime(): Boolean = !scheduledTime.isNullOrEmpty()
+    fun hasScheduledTime(): Boolean = scheduledAt.isNotEmpty()
 
     /**
      * 시그널이 활성 상태인지 확인
      */
-    fun isActive(): Boolean = status == SignalStatus.ACTIVE
+    fun isActive(): Boolean = status == "active"
 
     /**
      * 시그널이 완료된 상태인지 확인
      */
-    fun isCompleted(): Boolean = status == SignalStatus.COMPLETED
+    fun isCompleted(): Boolean = status == "completed"
 
     /**
      * 참여 가능한 상태인지 확인
@@ -59,20 +66,16 @@ data class Signal(
     /**
      * 만료 시간이 있는지 확인
      */
-    fun hasExpiration(): Boolean = !expiresAt.isNullOrEmpty()
+    fun hasExpiration(): Boolean = expiresAt.isNotEmpty()
 
     /**
      * 시그널이 만료되었는지 확인
      */
     fun isExpired(): Boolean {
-        return if (!expiresAt.isNullOrEmpty()) {
-            try {
-                val expireTime = LocalDateTime.parse(expiresAt, DateTimeFormatter.ISO_LOCAL_DATE_TIME)
-                LocalDateTime.now().isAfter(expireTime)
-            } catch (e: Exception) {
-                false
-            }
-        } else {
+        return try {
+            val expireTime = LocalDateTime.parse(expiresAt, DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+            LocalDateTime.now().isAfter(expireTime)
+        } catch (e: Exception) {
             false
         }
     }
@@ -81,16 +84,46 @@ data class Signal(
      * 예약된 시간까지의 시간 차이 (분)
      */
     fun getMinutesUntilScheduled(): Long? {
-        return if (!scheduledTime.isNullOrEmpty()) {
-            try {
-                val scheduled = LocalDateTime.parse(scheduledTime, DateTimeFormatter.ISO_LOCAL_DATE_TIME)
-                val now = LocalDateTime.now()
-                java.time.Duration.between(now, scheduled).toMinutes()
-            } catch (e: Exception) {
-                null
-            }
-        } else {
+        return try {
+            val scheduled = LocalDateTime.parse(scheduledAt, DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+            val now = LocalDateTime.now()
+            java.time.Duration.between(now, scheduled).toMinutes()
+        } catch (e: Exception) {
             null
+        }
+    }
+
+    /**
+     * 성별 선호도 표시 이름
+     */
+    fun getGenderPreferenceDisplayName(): String {
+        return when (genderPreference) {
+            "male" -> "남성만"
+            "female" -> "여성만"
+            else -> "성별 무관"
+        }
+    }
+
+    /**
+     * 연령대 범위 표시
+     */
+    fun getAgeRangeDisplayName(): String {
+        return when {
+            minAge == null && maxAge == null -> "전 연령"
+            minAge == null -> "${maxAge}세 이하"
+            maxAge == null -> "${minAge}세 이상"
+            else -> "${minAge}세 - ${maxAge}세"
+        }
+    }
+
+    /**
+     * 참가 방식 표시 이름
+     */
+    fun getJoinMethodDisplayName(): String {
+        return when {
+            allowInstantJoin -> "즉시 참가"
+            requireApproval -> "승인 필요"
+            else -> "자유 참가"
         }
     }
 }
@@ -209,3 +242,119 @@ data class MapBounds(
         return Pair((minLat + maxLat) / 2.0, (minLon + maxLon) / 2.0)
     }
 }
+
+/**
+ * 사용자 모델
+ */
+data class UserModel(
+    val id: Int,
+    val email: String,
+    val username: String?,
+    @SerializedName("is_active")
+    val isActive: Boolean,
+    val profile: UserProfileModel?
+)
+
+/**
+ * 사용자 프로필 모델
+ */
+data class UserProfileModel(
+    @SerializedName("display_name")
+    val displayName: String?,
+    val bio: String?,
+    @SerializedName("profile_image_url")
+    val profileImageUrl: String?,
+    val age: Int,
+    val gender: String,
+    @SerializedName("manner_score")
+    val mannerScore: Double,
+    @SerializedName("total_ratings")
+    val totalRatings: Int
+)
+
+/**
+ * 시그널 참가 신청서 모델
+ */
+data class SignalJoinRequest(
+    val id: Int,
+    @SerializedName("signal_id")
+    val signalId: Int,
+    @SerializedName("user_id")
+    val userId: Int,
+    val user: UserModel?,
+    val message: String?,
+    val status: String, // pending, approved, rejected, expired
+    @SerializedName("response_message")
+    val responseMessage: String?,
+    @SerializedName("created_at")
+    val createdAt: String,
+    @SerializedName("updated_at")
+    val updatedAt: String
+) {
+    fun isPending(): Boolean = status == "pending"
+    fun isApproved(): Boolean = status == "approved"
+    fun isRejected(): Boolean = status == "rejected"
+    fun isExpired(): Boolean = status == "expired"
+}
+
+/**
+ * 시그널 생성 요청 모델
+ */
+data class CreateSignalRequest(
+    val title: String,
+    val description: String,
+    val category: String,
+    val latitude: Double,
+    val longitude: Double,
+    val address: String,
+    @SerializedName("place_name")
+    val placeName: String?,
+    @SerializedName("scheduled_at")
+    val scheduledAt: String, // ISO 8601 format
+    @SerializedName("max_participants")
+    val maxParticipants: Int,
+    @SerializedName("min_age")
+    val minAge: Int?,
+    @SerializedName("max_age")
+    val maxAge: Int?,
+    @SerializedName("allow_instant_join")
+    val allowInstantJoin: Boolean,
+    @SerializedName("require_approval")
+    val requireApproval: Boolean,
+    @SerializedName("gender_preference")
+    val genderPreference: String?
+)
+
+/**
+ * 시그널 참가 신청 요청 모델
+ */
+data class JoinSignalRequest(
+    val message: String?
+)
+
+/**
+ * 참가 신청 승인 요청 모델
+ */
+data class ApproveJoinRequestRequest(
+    @SerializedName("user_id")
+    val userId: Int,
+    val message: String?
+)
+
+/**
+ * 참가 신청 거절 요청 모델
+ */
+data class RejectJoinRequestRequest(
+    @SerializedName("user_id")
+    val userId: Int,
+    val reason: String
+)
+
+/**
+ * API 응답 래퍼 모델
+ */
+data class ApiResponse<T>(
+    val success: Boolean,
+    val message: String,
+    val data: T?
+)

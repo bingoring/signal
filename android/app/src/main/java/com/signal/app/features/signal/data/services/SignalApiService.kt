@@ -1,7 +1,6 @@
 package com.signal.app.features.signal.data.services
 
-import com.signal.app.features.signal.data.models.Signal
-import com.signal.app.features.signal.data.models.SignalWithDistance
+import com.signal.app.features.signal.data.models.*
 import retrofit2.http.*
 
 /**
@@ -42,7 +41,7 @@ interface SignalApiService {
      * 시그널 생성
      */
     @POST("api/signals")
-    suspend fun createSignal(@Body signalRequest: CreateSignalRequest): Signal
+    suspend fun createSignal(@Body signalRequest: CreateSignalRequest): ApiResponse<Signal>
 
     /**
      * 시그널 수정
@@ -51,57 +50,71 @@ interface SignalApiService {
     suspend fun updateSignal(
         @Path("id") signalId: Int,
         @Body signalRequest: UpdateSignalRequest
-    ): Signal
+    ): ApiResponse<Signal>
 
     /**
      * 시그널 삭제
      */
     @DELETE("api/signals/{id}")
-    suspend fun deleteSignal(@Path("id") signalId: Int)
+    suspend fun deleteSignal(@Path("id") signalId: Int): ApiResponse<Unit>
 
     /**
-     * 시그널 참여
+     * 시그널 참여 (즉시 참가)
      */
     @POST("api/signals/{id}/join")
     suspend fun joinSignal(
         @Path("id") signalId: Int,
-        @Body joinRequest: JoinSignalRequest? = null
-    )
+        @Body joinRequest: JoinSignalRequest
+    ): ApiResponse<Unit>
 
     /**
      * 시그널 나가기
      */
     @POST("api/signals/{id}/leave")
-    suspend fun leaveSignal(@Path("id") signalId: Int)
+    suspend fun leaveSignal(@Path("id") signalId: Int): ApiResponse<Unit>
 
     /**
      * 내가 참여한 시그널 목록
      */
     @GET("api/signals/my-signals")
-    suspend fun getMySignals(): List<Signal>
+    suspend fun getMySignals(): ApiResponse<List<Signal>>
 
     /**
      * 내가 생성한 시그널 목록
      */
     @GET("api/signals/my-created-signals")
-    suspend fun getMyCreatedSignals(): List<Signal>
-}
+    suspend fun getMyCreatedSignals(): ApiResponse<List<Signal>>
 
-/**
- * 시그널 생성 요청 모델
- */
-data class CreateSignalRequest(
-    val title: String,
-    val description: String,
-    val category: String,
-    val latitude: Double,
-    val longitude: Double,
-    val address: String,
-    val maxParticipants: Int,
-    val scheduledTime: String? = null, // ISO 8601 format
-    val isPrivate: Boolean = false,
-    val tags: List<String> = emptyList()
-)
+    /**
+     * 시그널 참가 신청서 목록 조회
+     */
+    @GET("api/signals/{id}/join-requests")
+    suspend fun getJoinRequests(@Path("id") signalId: Int): ApiResponse<List<SignalJoinRequest>>
+
+    /**
+     * 참가 신청서 승인
+     */
+    @POST("api/signals/{id}/join-requests/approve")
+    suspend fun approveJoinRequest(
+        @Path("id") signalId: Int,
+        @Body request: ApproveJoinRequestRequest
+    ): ApiResponse<Unit>
+
+    /**
+     * 참가 신청서 거절
+     */
+    @POST("api/signals/{id}/join-requests/reject")
+    suspend fun rejectJoinRequest(
+        @Path("id") signalId: Int,
+        @Body request: RejectJoinRequestRequest
+    ): ApiResponse<Unit>
+
+    /**
+     * 내 참가 신청 상태 조회
+     */
+    @GET("api/signals/{id}/my-join-status")
+    suspend fun getMyJoinStatus(@Path("id") signalId: Int): ApiResponse<SignalJoinRequest?>
+}
 
 /**
  * 시그널 수정 요청 모델
@@ -111,14 +124,10 @@ data class UpdateSignalRequest(
     val description: String?,
     val category: String?,
     val maxParticipants: Int?,
-    val scheduledTime: String?, // ISO 8601 format
-    val isPrivate: Boolean?,
-    val tags: List<String>?
-)
-
-/**
- * 시그널 참여 요청 모델
- */
-data class JoinSignalRequest(
-    val message: String? = null
+    val scheduledAt: String?, // ISO 8601 format
+    val minAge: Int?,
+    val maxAge: Int?,
+    val allowInstantJoin: Boolean?,
+    val requireApproval: Boolean?,
+    val genderPreference: String?
 )
