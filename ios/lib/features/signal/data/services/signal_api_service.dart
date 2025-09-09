@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:retrofit/retrofit.dart';
 import '../models/signal_model.dart';
+import '../models/signal.dart';
 
 part 'signal_api_service.g.dart';
 
@@ -50,6 +51,24 @@ abstract class SignalApiService {
   /// 시그널 나가기
   @POST('/signals/{id}/leave')
   Future<ApiResponse<dynamic>> leaveSignal(@Path('id') int signalId);
+
+  /// 참가 신청서 목록 조회 (신호 생성자용)
+  @GET('/signals/{id}/join-requests')
+  Future<ApiResponse<List<SignalJoinRequest>>> getJoinRequests(@Path('id') int signalId);
+
+  /// 참가 신청서 승인
+  @POST('/signals/{id}/join-requests/approve')
+  Future<ApiResponse<dynamic>> approveJoinRequest(
+    @Path('id') int signalId,
+    @Body() ApproveJoinRequestRequest request,
+  );
+
+  /// 참가 신청서 거절
+  @POST('/signals/{id}/join-requests/reject')
+  Future<ApiResponse<dynamic>> rejectJoinRequest(
+    @Path('id') int signalId,
+    @Body() RejectJoinRequestRequest request,
+  );
 }
 
 class ApiResponse<T> {

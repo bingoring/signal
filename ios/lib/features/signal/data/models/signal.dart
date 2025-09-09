@@ -406,6 +406,118 @@ class JoinSignalRequest extends Equatable {
   List<Object?> get props => [message];
 }
 
+// Join Request Models for enhanced workflow
+@JsonSerializable()
+class SignalJoinRequest extends Equatable {
+  final int id;
+  @JsonKey(name: 'signal_id')
+  final int signalId;
+  @JsonKey(name: 'user_id')
+  final int userId;
+  final String status;
+  final String? message;
+  @JsonKey(name: 'approved_by')
+  final int? approvedBy;
+  @JsonKey(name: 'approved_at')
+  final DateTime? approvedAt;
+  @JsonKey(name: 'rejected_by')
+  final int? rejectedBy;
+  @JsonKey(name: 'rejected_at')
+  final DateTime? rejectedAt;
+  @JsonKey(name: 'rejection_reason')
+  final String? rejectionReason;
+  @JsonKey(name: 'expires_at')
+  final DateTime expiresAt;
+  @JsonKey(name: 'created_at')
+  final DateTime createdAt;
+  @JsonKey(name: 'updated_at')
+  final DateTime updatedAt;
+  final Signal? signal;
+  final User? user;
+  final User? approver;
+  final User? rejector;
+
+  const SignalJoinRequest({
+    required this.id,
+    required this.signalId,
+    required this.userId,
+    required this.status,
+    this.message,
+    this.approvedBy,
+    this.approvedAt,
+    this.rejectedBy,
+    this.rejectedAt,
+    this.rejectionReason,
+    required this.expiresAt,
+    required this.createdAt,
+    required this.updatedAt,
+    this.signal,
+    this.user,
+    this.approver,
+    this.rejector,
+  });
+
+  factory SignalJoinRequest.fromJson(Map<String, dynamic> json) => _$SignalJoinRequestFromJson(json);
+  Map<String, dynamic> toJson() => _$SignalJoinRequestToJson(this);
+
+  @override
+  List<Object?> get props => [
+    id,
+    signalId,
+    userId,
+    status,
+    message,
+    approvedBy,
+    approvedAt,
+    rejectedBy,
+    rejectedAt,
+    rejectionReason,
+    expiresAt,
+    createdAt,
+    updatedAt,
+    signal,
+    user,
+    approver,
+    rejector,
+  ];
+}
+
+@JsonSerializable()
+class ApproveJoinRequestRequest extends Equatable {
+  @JsonKey(name: 'user_id')
+  final int userId;
+  final String? message;
+
+  const ApproveJoinRequestRequest({
+    required this.userId,
+    this.message,
+  });
+
+  factory ApproveJoinRequestRequest.fromJson(Map<String, dynamic> json) => _$ApproveJoinRequestRequestFromJson(json);
+  Map<String, dynamic> toJson() => _$ApproveJoinRequestRequestToJson(this);
+
+  @override
+  List<Object?> get props => [userId, message];
+}
+
+@JsonSerializable()
+class RejectJoinRequestRequest extends Equatable {
+  @JsonKey(name: 'user_id')
+  final int userId;
+  final String reason;
+
+  const RejectJoinRequestRequest({
+    required this.userId,
+    required this.reason,
+  });
+
+  factory RejectJoinRequestRequest.fromJson(Map<String, dynamic> json) => _$RejectJoinRequestRequestFromJson(json);
+  Map<String, dynamic> toJson() => _$RejectJoinRequestRequestToJson(this);
+
+  @override
+  List<Object?> get props => [userId, reason];
+}
+
 // 상수 정의
 class SignalStatus {
   static const String active = 'active';
@@ -423,13 +535,22 @@ class ParticipantStatus {
   static const String noShow = 'no_show';
 }
 
+class JoinRequestStatus {
+  static const String pending = 'pending';
+  static const String approved = 'approved';
+  static const String rejected = 'rejected';
+  static const String expired = 'expired';
+}
+
 class InterestCategory {
   static const String sports = 'sports';
   static const String food = 'food';
+  static const String game = 'game';
   static const String culture = 'culture';
   static const String study = 'study';
   static const String hobby = 'hobby';
   static const String travel = 'travel';
   static const String shopping = 'shopping';
-  static const String entertainment = 'entertainment';
+  static const String music = 'music';
+  static const String movie = 'movie';
 }
