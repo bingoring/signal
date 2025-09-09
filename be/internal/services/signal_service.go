@@ -73,9 +73,17 @@ func (s *SignalService) CreateSignal(creatorID uint, req *models.CreateSignalReq
 		return nil, fmt.Errorf("비활성 사용자는 시그널을 생성할 수 없습니다")
 	}
 
-	// 매너 점수 확인 (최소 32점)
-	if user.Profile != nil && user.Profile.MannerScore < 32.0 {
-		return nil, fmt.Errorf("매너 점수가 부족하여 시그널을 생성할 수 없습니다 (최소 32점 필요)")
+	// Enhanced manner score validation with detailed feedback
+	if user.Profile != nil {
+		if user.Profile.MannerScore < 32.0 {
+			return nil, fmt.Errorf("매너 점수가 부족하여 시그널을 생성할 수 없습니다 (현재: %.1f점, 최소: 32.0점)", user.Profile.MannerScore)
+		}
+		// Additional validation for high-quality signals
+		if user.Profile.MannerScore >= 80.0 {
+			s.logger.Info(fmt.Sprintf("고품질 사용자 시그널 생성: 사용자 %d, 매너점수 %.1f", creatorID, user.Profile.MannerScore))
+		}
+	} else {
+		return nil, fmt.Errorf("프로필 정보가 완성되지 않아 시그널을 생성할 수 없습니다")
 	}
 
 	// 2. 시간 유효성 검사
@@ -98,13 +106,34 @@ func (s *SignalService) CreateSignal(creatorID uint, req *models.CreateSignalReq
 		return nil, fmt.Errorf("한국 내 위치만 지원됩니다")
 	}
 
-	// 4. 일일 시그널 생성 제한 확인
+	// 4. Enhanced rate limiting with dynamic limits based on manner score
 	dailyCount, err := s.signalRepo.GetDailySignalCount(creatorID, now)
 	if err != nil {
 		return nil, fmt.Errorf("일일 시그널 생성 횟수 확인 실패")
 	}
-	if dailyCount >= 5 { // 하루 최대 5개
-		return nil, fmt.Errorf("하루에 최대 5개의 시그널만 생성할 수 있습니다")
+	
+	// Dynamic daily limit based on manner score
+	dailyLimit := 5 // Base limit
+	if user.Profile.MannerScore >= 50.0 {
+		dailyLimit = 8
+	}
+	if user.Profile.MannerScore >= 70.0 {
+		dailyLimit = 12
+	}
+	if user.Profile.MannerScore >= 90.0 {
+		dailyLimit = 20
+	}
+	
+	if dailyCount >= int64(dailyLimit) {
+		return nil, fmt.Errorf("일일 시그널 생성 한도에 도달했습니다 (%d/%d)", dailyCount, dailyLimit)
+	}
+	
+	// Additional hourly rate limiting for new users
+	if user.Profile.MannerScore < 40.0 {
+		hourlyCount, err := s.signalRepo.GetHourlySignalCount(creatorID, now)
+		if err == nil && hourlyCount >= 2 {
+			return nil, fmt.Errorf("시간당 시그널 생성 한도에 도달했습니다 (신규 사용자: 2개/시간)")
+		}
 	}
 
 	// 5. 동일 위치/시간대 중복 시그널 확인
@@ -259,9 +288,16 @@ func (s *SignalService) JoinSignal(signalID, userID uint, req *models.JoinSignal
 		return fmt.Errorf("비활성 사용자는 시그널에 참여할 수 없습니다")
 	}
 
-	// 매너 점수 확인
-	if user.Profile != nil && user.Profile.MannerScore < 30.0 {
-		return fmt.Errorf("매너 점수가 부족하여 참여할 수 없습니다 (최소 30점 필요)")
+	// Enhanced manner score validation
+	if user.Profile != nil {
+		minMannerScore := 30.0
+		if signal.Category == "study" || signal.Category == "culture" {
+			minMannerScore = 35.0 // Higher requirements for quality activities
+		}
+		if user.Profile.MannerScore < minMannerScore {
+			return fmt.Errorf("매너 점수가 부족하여 참여할 수 없습니다 (현재: %.1f점, 필요: %.1f점)", 
+				user.Profile.MannerScore, minMannerScore)
+		}
 	}
 
 	// 3. 시그널 참여 가능 여부 검사
@@ -352,12 +388,18 @@ func (s *SignalService) JoinSignal(signalID, userID uint, req *models.JoinSignal
 		}()
 	}
 
-	// 11. 생성자에게 알림 발송
+	// 11. Enhanced notification system with preferences
 	go func() {
 		if status == models.ParticipantPending {
 			s.notifyCreatorOfJoinRequest(signal.CreatorID, signal, user)
+			// Auto-notification for high-priority signals
+			if signal.Category == "emergency" || signal.ScheduledAt.Sub(time.Now()) <= 30*time.Minute {
+				s.notifyUrgentJoinRequest(signal.CreatorID, signal, user)
+			}
 		} else {
 			s.notifyCreatorOfJoinApproval(signal.CreatorID, signal, user)
+			// Send welcome message to auto-approved participant
+			s.sendWelcomeMessage(signalID, userID)
 		}
 	}()
 
@@ -950,5 +992,562 @@ func (s *SignalService) NotifySignalParticipantChange(signalID uint) {
 		s.BroadcastSignalStatusUpdate(signalID, models.SignalFull)
 	} else {
 		s.broadcastSignalUpdate(signal, "signal_updated")
+	}
+}
+
+// ============================================================================
+// ENHANCED JOIN REQUEST SYSTEM - Sprint 2 Implementation
+// ============================================================================
+
+// CreateJoinRequest creates a new join request with enhanced validation and rate limiting
+func (s *SignalService) CreateJoinRequest(signalID, userID uint, req *models.CreateJoinRequestRequest, userIP, userAgent string) (*models.SignalJoinRequest, error) {
+	ctx := context.Background()
+
+	// 1. Validate signal and user
+	signal, err := s.signalRepo.GetByID(signalID)
+	if err != nil {
+		return nil, fmt.Errorf("시그널을 찾을 수 없습니다")
+	}
+
+	user, err := s.userRepo.GetByID(userID)
+	if err != nil {
+		return nil, fmt.Errorf("사용자 정보를 찾을 수 없습니다")
+	}
+
+	// 2. Enhanced eligibility validation
+	if err := s.ValidateSignalEligibility(userID, signal); err != nil {
+		return nil, err
+	}
+
+	// 3. Rate limiting checks
+	if err := s.CheckRateLimits(userID, "join_request"); err != nil {
+		return nil, err
+	}
+
+	// 4. Check for existing join requests
+	existingRequests, err := s.signalRepo.GetUserJoinRequests(signalID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("기존 참여 요청 확인 실패")
+	}
+
+	for _, existing := range existingRequests {
+		switch existing.Status {
+		case models.JoinRequestPending:
+			return nil, fmt.Errorf("이미 참여 요청을 보냈습니다")
+		case models.JoinRequestApproved:
+			return nil, fmt.Errorf("이미 승인된 참여자입니다")
+		case models.JoinRequestRejected:
+			// Allow retry after 24 hours
+			if time.Since(existing.UpdatedAt) < 24*time.Hour {
+				return nil, fmt.Errorf("거절된 후 24시간 후에 재신청 가능합니다")
+			}
+		}
+	}
+
+	// 5. Create join request with expiration
+	now := time.Now()
+	expiresAt := now.Add(72 * time.Hour) // 72 hours to respond
+	if signal.ScheduledAt.Before(expiresAt) {
+		expiresAt = signal.ScheduledAt.Add(-1 * time.Hour) // Expire 1 hour before signal
+	}
+
+	joinRequest := &models.SignalJoinRequest{
+		SignalID:    signalID,
+		UserID:      userID,
+		Status:      models.JoinRequestPending,
+		Message:     req.Message,
+		UserIP:      userIP,
+		UserAgent:   userAgent,
+		ExpiresAt:   expiresAt,
+	}
+
+	// 6. Save to database
+	if err := s.signalRepo.CreateJoinRequest(joinRequest); err != nil {
+		s.logger.Error("참여 요청 생성 실패", err)
+		return nil, fmt.Errorf("참여 요청 생성에 실패했습니다")
+	}
+
+	// 7. Auto-approve for instant join signals
+	if signal.AllowInstantJoin && !signal.RequireApproval {
+		approveReq := &models.ApproveJoinRequestRequest{
+			UserID:  userID,
+			Message: "자동 승인됨",
+		}
+		if err := s.ApproveJoinRequest(signalID, signal.CreatorID, userID, approveReq); err != nil {
+			s.logger.Error("자동 승인 실패", err)
+		}
+	} else {
+		// 8. Notify signal creator
+		go s.notifyCreatorOfJoinRequest(signal.CreatorID, signal, user)
+	}
+
+	// 9. Schedule expiration cleanup
+	go s.queue.ScheduleJoinRequestExpiration(ctx, joinRequest.ID, expiresAt)
+
+	s.logger.LogJoinRequestCreated(ctx, joinRequest.ID, signalID, userID)
+
+	return joinRequest, nil
+}
+
+// ApproveJoinRequest approves a join request with enhanced workflow
+func (s *SignalService) ApproveJoinRequest(signalID, creatorID, userID uint, req *models.ApproveJoinRequestRequest) error {
+	ctx := context.Background()
+
+	// 1. Validate signal and creator
+	signal, err := s.signalRepo.GetByID(signalID)
+	if err != nil {
+		return fmt.Errorf("시그널을 찾을 수 없습니다")
+	}
+
+	if signal.CreatorID != creatorID {
+		return fmt.Errorf("시그널 생성자만 승인할 수 있습니다")
+	}
+
+	// 2. Check if signal is still accepting participants
+	if signal.Status != models.SignalActive {
+		return fmt.Errorf("참여를 받지 않는 시그널입니다")
+	}
+
+	if signal.CurrentParticipants >= signal.MaxParticipants {
+		return fmt.Errorf("정원이 마감되었습니다")
+	}
+
+	// 3. Find and validate join request
+	joinRequest, err := s.signalRepo.GetJoinRequest(signalID, userID)
+	if err != nil {
+		return fmt.Errorf("참여 요청을 찾을 수 없습니다")
+	}
+
+	if joinRequest.Status != models.JoinRequestPending {
+		return fmt.Errorf("이미 처리된 요청입니다")
+	}
+
+	if time.Now().After(joinRequest.ExpiresAt) {
+		return fmt.Errorf("만료된 참여 요청입니다")
+	}
+
+	// 4. Transaction: Update join request and create participant
+	if err := s.signalRepo.CreateWithTransaction(func(tx interface{}) error {
+		// Update join request status
+		now := time.Now()
+		joinRequest.Status = models.JoinRequestApproved
+		joinRequest.ApprovedBy = &creatorID
+		joinRequest.ApprovedAt = &now
+		
+		if err := s.signalRepo.UpdateJoinRequestTx(tx, joinRequest); err != nil {
+			return err
+		}
+
+		// Create participant
+		participant := &models.SignalParticipant{
+			SignalID: signalID,
+			UserID:   userID,
+			Status:   models.ParticipantApproved,
+			Message:  req.Message,
+			JoinedAt: &now,
+		}
+
+		if err := s.signalRepo.CreateParticipantTx(tx, participant); err != nil {
+			return err
+		}
+
+		// Update signal participant count
+		return s.signalRepo.IncrementParticipantCountTx(tx, signalID)
+	}); err != nil {
+		s.logger.Error("참여 승인 트랜잭션 실패", err)
+		return fmt.Errorf("참여 승인에 실패했습니다")
+	}
+
+	// 5. Post-approval actions
+	go func() {
+		// Invite to chat room
+		if err := s.inviteUserToChatRoom(signalID, userID); err != nil {
+			s.logger.Error("채팅방 초대 실패", err)
+		}
+
+		// Send approval notification to user
+		s.notifyUserOfApproval(userID, signal)
+
+		// Update caches
+		s.invalidateSignalCaches(signalID)
+	}()
+
+	// 6. Real-time updates
+	go s.NotifySignalParticipantChange(signalID)
+
+	s.logger.LogJoinRequestApproved(ctx, joinRequest.ID, signalID, userID, creatorID)
+
+	return nil
+}
+
+// RejectJoinRequest rejects a join request with reason
+func (s *SignalService) RejectJoinRequest(signalID, creatorID, userID uint, req *models.RejectJoinRequestRequest) error {
+	ctx := context.Background()
+
+	// 1. Validate signal and creator
+	signal, err := s.signalRepo.GetByID(signalID)
+	if err != nil {
+		return fmt.Errorf("시그널을 찾을 수 없습니다")
+	}
+
+	if signal.CreatorID != creatorID {
+		return fmt.Errorf("시그널 생성자만 거절할 수 있습니다")
+	}
+
+	// 2. Find and validate join request
+	joinRequest, err := s.signalRepo.GetJoinRequest(signalID, userID)
+	if err != nil {
+		return fmt.Errorf("참여 요청을 찾을 수 없습니다")
+	}
+
+	if joinRequest.Status != models.JoinRequestPending {
+		return fmt.Errorf("이미 처리된 요청입니다")
+	}
+
+	// 3. Update join request with rejection
+	now := time.Now()
+	joinRequest.Status = models.JoinRequestRejected
+	joinRequest.RejectedBy = &creatorID
+	joinRequest.RejectedAt = &now
+	joinRequest.RejectionReason = req.Reason
+
+	if err := s.signalRepo.UpdateJoinRequest(joinRequest); err != nil {
+		s.logger.Error("참여 거절 업데이트 실패", err)
+		return fmt.Errorf("참여 거절에 실패했습니다")
+	}
+
+	// 4. Notify user of rejection
+	go s.notifyUserOfRejection(userID, signal, req.Reason)
+
+	s.logger.LogJoinRequestRejected(ctx, joinRequest.ID, signalID, userID, creatorID)
+
+	return nil
+}
+
+// GetPendingJoinRequests retrieves pending join requests for a signal
+func (s *SignalService) GetPendingJoinRequests(signalID, creatorID uint) ([]models.SignalJoinRequest, error) {
+	// Validate creator permissions
+	signal, err := s.signalRepo.GetByID(signalID)
+	if err != nil {
+		return nil, fmt.Errorf("시그널을 찾을 수 없습니다")
+	}
+
+	if signal.CreatorID != creatorID {
+		return nil, fmt.Errorf("시그널 생성자만 조회할 수 있습니다")
+	}
+
+	// Get pending requests with user information
+	requests, err := s.signalRepo.GetPendingJoinRequests(signalID)
+	if err != nil {
+		s.logger.Error("대기중인 참여 요청 조회 실패", err)
+		return nil, fmt.Errorf("참여 요청 조회에 실패했습니다")
+	}
+
+	return requests, nil
+}
+
+// GetMyJoinRequests retrieves user's join requests with pagination
+func (s *SignalService) GetMyJoinRequests(userID uint, page, limit int) ([]models.SignalJoinRequest, *utils.Pagination, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+
+	requests, total, err := s.signalRepo.GetUserJoinRequestsPaginated(userID, page, limit)
+	if err != nil {
+		s.logger.Error("내 참여 요청 조회 실패", err)
+		return nil, nil, fmt.Errorf("참여 요청 조회에 실패했습니다")
+	}
+
+	pagination := utils.CalculatePagination(page, limit, total)
+
+	return requests, &pagination, nil
+}
+
+// ============================================================================
+// SIGNAL MANAGEMENT ENHANCEMENTS
+// ============================================================================
+
+// UpdateSignalStatus updates signal status with validation
+func (s *SignalService) UpdateSignalStatus(signalID uint, status models.SignalStatus) error {
+	signal, err := s.signalRepo.GetByID(signalID)
+	if err != nil {
+		return fmt.Errorf("시그널을 찾을 수 없습니다")
+	}
+
+	// Validate status transition
+	if !s.isValidStatusTransition(signal.Status, status) {
+		return fmt.Errorf("유효하지 않은 상태 변경입니다: %s -> %s", signal.Status, status)
+	}
+
+	// Update status
+	signal.Status = status
+	if err := s.signalRepo.Update(signal); err != nil {
+		s.logger.Error("시그널 상태 업데이트 실패", err)
+		return fmt.Errorf("상태 업데이트에 실패했습니다")
+	}
+
+	// Broadcast status change
+	go s.BroadcastSignalStatusUpdate(signalID, status)
+
+	// Update caches
+	go s.invalidateSignalCaches(signalID)
+
+	s.logger.Info(fmt.Sprintf("시그널 %d 상태 변경: %s", signalID, status))
+
+	return nil
+}
+
+// CancelSignal cancels a signal with reason
+func (s *SignalService) CancelSignal(signalID, userID uint, reason string) error {
+	signal, err := s.signalRepo.GetByID(signalID)
+	if err != nil {
+		return fmt.Errorf("시그널을 찾을 수 없습니다")
+	}
+
+	if signal.CreatorID != userID {
+		return fmt.Errorf("시그널 생성자만 취소할 수 있습니다")
+	}
+
+	if signal.Status != models.SignalActive {
+		return fmt.Errorf("취소할 수 없는 시그널입니다")
+	}
+
+	// Update status and notify participants
+	if err := s.UpdateSignalStatus(signalID, models.SignalCancelled); err != nil {
+		return err
+	}
+
+	// Notify all participants
+	go s.notifySignalCancellation(signal, reason)
+
+	return nil
+}
+
+// CompleteSignal marks a signal as completed
+func (s *SignalService) CompleteSignal(signalID, userID uint) error {
+	signal, err := s.signalRepo.GetByID(signalID)
+	if err != nil {
+		return fmt.Errorf("시그널을 찾을 수 없습니다")
+	}
+
+	if signal.CreatorID != userID {
+		return fmt.Errorf("시그널 생성자만 완료할 수 있습니다")
+	}
+
+	return s.UpdateSignalStatus(signalID, models.SignalCompleted)
+}
+
+// ============================================================================
+// RATE LIMITING AND VALIDATION
+// ============================================================================
+
+// CheckRateLimits validates user rate limits for various actions
+func (s *SignalService) CheckRateLimits(userID uint, action string) error {
+	ctx := context.Background()
+	now := time.Now()
+
+	switch action {
+	case "join_request":
+		// Daily join request limit
+		dailyKey := fmt.Sprintf("rate_limit:join_request:daily:%d:%s", userID, now.Format("2006-01-02"))
+		dailyCount, err := s.redisClient.Incr(ctx, dailyKey)
+		if err == nil {
+			s.redisClient.Expire(ctx, dailyKey, 24*time.Hour)
+			if dailyCount > 15 { // Max 15 join requests per day
+				return fmt.Errorf("일일 참여 요청 한도에 도달했습니다 (15개/일)")
+			}
+		}
+
+		// Hourly join request limit for spam prevention
+		hourlyKey := fmt.Sprintf("rate_limit:join_request:hourly:%d:%s", userID, now.Format("2006-01-02-15"))
+		hourlyCount, err := s.redisClient.Incr(ctx, hourlyKey)
+		if err == nil {
+			s.redisClient.Expire(ctx, hourlyKey, time.Hour)
+			if hourlyCount > 5 { // Max 5 join requests per hour
+				return fmt.Errorf("시간당 참여 요청 한도에 도달했습니다 (5개/시간)")
+			}
+		}
+
+	case "signal_creation":
+		// Already handled in CreateSignal method
+		break
+	}
+
+	return nil
+}
+
+// ValidateSignalEligibility checks if user can participate in signal
+func (s *SignalService) ValidateSignalEligibility(userID uint, signal *models.Signal) error {
+	user, err := s.userRepo.GetByID(userID)
+	if err != nil {
+		return fmt.Errorf("사용자 정보를 찾을 수 없습니다")
+	}
+
+	if !user.IsActive {
+		return fmt.Errorf("비활성 사용자는 참여할 수 없습니다")
+	}
+
+	// Enhanced manner score validation
+	if user.Profile != nil {
+		minMannerScore := 30.0
+		if signal.Category == "study" || signal.Category == "culture" {
+			minMannerScore = 35.0 // Higher requirements for quality activities
+		}
+		if user.Profile.MannerScore < minMannerScore {
+			return fmt.Errorf("매너 점수가 부족하여 참여할 수 없습니다 (현재: %.1f점, 필요: %.1f점)", 
+				user.Profile.MannerScore, minMannerScore)
+		}
+	}
+
+	// Basic signal validation
+	if signal.Status != models.SignalActive {
+		return fmt.Errorf("참여할 수 없는 시그널입니다")
+	}
+
+	if signal.CreatorID == userID {
+		return fmt.Errorf("자신이 생성한 시그널에는 참여할 수 없습니다")
+	}
+
+	if signal.CurrentParticipants >= signal.MaxParticipants {
+		return fmt.Errorf("정원이 마감되었습니다")
+	}
+
+	if time.Now().After(signal.ScheduledAt) {
+		return fmt.Errorf("이미 시작된 시그널입니다")
+	}
+
+	// Age and gender validation
+	return s.validateUserEligibility(user, signal)
+}
+
+// ============================================================================
+// HELPER METHODS
+// ============================================================================
+
+// isValidStatusTransition validates signal status transitions
+func (s *SignalService) isValidStatusTransition(from, to models.SignalStatus) bool {
+	validTransitions := map[models.SignalStatus][]models.SignalStatus{
+		models.SignalActive:    {models.SignalFull, models.SignalClosed, models.SignalCancelled, models.SignalCompleted},
+		models.SignalFull:      {models.SignalClosed, models.SignalCancelled, models.SignalCompleted},
+		models.SignalClosed:    {models.SignalCompleted},
+		models.SignalCancelled: {}, // Final state
+		models.SignalCompleted: {}, // Final state
+	}
+
+	allowed, exists := validTransitions[from]
+	if !exists {
+		return false
+	}
+
+	for _, allowedStatus := range allowed {
+		if allowedStatus == to {
+			return true
+		}
+	}
+
+	return false
+}
+
+// invalidateSignalCaches invalidates all caches related to a signal
+func (s *SignalService) invalidateSignalCaches(signalID uint) {
+	ctx := context.Background()
+	
+	// Remove from Redis GEO cache
+	s.RemoveSignalFromGeoCache(signalID)
+	
+	// Invalidate signal details cache
+	signalKey := fmt.Sprintf("signal:%d:details", signalID)
+	s.redisClient.Delete(ctx, signalKey)
+	
+	// Invalidate nearby caches (this could be optimized with signal location)
+	// For now, we'll invalidate common cache patterns
+	pattern := "nearby_signals:*"
+	keys, err := s.redisClient.Keys(ctx, pattern)
+	if err == nil {
+		for _, key := range keys {
+			s.redisClient.Delete(ctx, key)
+		}
+	}
+}
+
+// Enhanced notification methods
+func (s *SignalService) notifyUrgentJoinRequest(creatorID uint, signal *models.Signal, user *models.User) {
+	title := fmt.Sprintf("🚨 긴급 참여 요청: %s", signal.Title)
+	body := fmt.Sprintf("%s님이 긴급 참여를 요청했습니다 (시작 임박)", user.Profile.DisplayName)
+	data := map[string]string{
+		"type":      "urgent_join_request",
+		"signal_id": fmt.Sprintf("%d", signal.ID),
+		"user_id":   fmt.Sprintf("%d", user.ID),
+		"priority":  "high",
+	}
+
+	if err := s.queue.PushNotification(nil, []uint{creatorID}, title, body, data); err != nil {
+		s.logger.Error("긴급 참여 요청 알림 발송 실패", err)
+	}
+}
+
+func (s *SignalService) sendWelcomeMessage(signalID, userID uint) {
+	// TODO: Implement welcome message sending when chat service is available
+	s.logger.Info(fmt.Sprintf("환영 메시지 발송: 시그널 %d, 사용자 %d", signalID, userID))
+}
+
+func (s *SignalService) notifyUserOfApproval(userID uint, signal *models.Signal) {
+	title := fmt.Sprintf("✅ 참여 승인: %s", signal.Title)
+	body := fmt.Sprintf("참여가 승인되었습니다! 채팅방에서 만나요.")
+	data := map[string]string{
+		"type":      "join_approved",
+		"signal_id": fmt.Sprintf("%d", signal.ID),
+	}
+
+	if err := s.queue.PushNotification(nil, []uint{userID}, title, body, data); err != nil {
+		s.logger.Error("승인 알림 발송 실패", err)
+	}
+}
+
+func (s *SignalService) notifyUserOfRejection(userID uint, signal *models.Signal, reason string) {
+	title := fmt.Sprintf("❌ 참여 거절: %s", signal.Title)
+	body := fmt.Sprintf("참여가 거절되었습니다: %s", reason)
+	data := map[string]string{
+		"type":      "join_rejected",
+		"signal_id": fmt.Sprintf("%d", signal.ID),
+		"reason":    reason,
+	}
+
+	if err := s.queue.PushNotification(nil, []uint{userID}, title, body, data); err != nil {
+		s.logger.Error("거절 알림 발송 실패", err)
+	}
+}
+
+func (s *SignalService) notifySignalCancellation(signal *models.Signal, reason string) {
+	participants, err := s.signalRepo.GetParticipants(signal.ID)
+	if err != nil {
+		s.logger.Error("참여자 조회 실패", err)
+		return
+	}
+
+	userIDs := make([]uint, 0, len(participants))
+	for _, p := range participants {
+		if p.Status == models.ParticipantApproved {
+			userIDs = append(userIDs, p.UserID)
+		}
+	}
+
+	if len(userIDs) == 0 {
+		return
+	}
+
+	title := fmt.Sprintf("🚫 시그널 취소: %s", signal.Title)
+	body := fmt.Sprintf("시그널이 취소되었습니다: %s", reason)
+	data := map[string]string{
+		"type":      "signal_cancelled",
+		"signal_id": fmt.Sprintf("%d", signal.ID),
+		"reason":    reason,
+	}
+
+	if err := s.queue.PushNotification(nil, userIDs, title, body, data); err != nil {
+		s.logger.Error("취소 알림 발송 실패", err)
 	}
 }

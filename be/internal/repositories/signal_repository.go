@@ -27,11 +27,23 @@ type SignalRepositoryInterface interface {
 	
 	// Sprint 2에서 추가된 메서드들
 	GetDailySignalCount(userID uint, date time.Time) (int64, error)
+	GetHourlySignalCount(userID uint, date time.Time) (int64, error)
 	CheckDuplicateSignal(userID uint, lat, lon float64, scheduledAt time.Time) (bool, error)
 	GetDailyJoinCount(userID uint, date time.Time) (int64, error)
 	CreateWithTransaction(fn func(tx interface{}) error) error
 	CreateTx(tx interface{}, signal *models.Signal) error
 	CreateParticipantTx(tx interface{}, participant *models.SignalParticipant) error
+	IncrementParticipantCountTx(tx interface{}, signalID uint) error
+	
+	// Enhanced Join Request System
+	CreateJoinRequest(request *models.SignalJoinRequest) error
+	GetJoinRequest(signalID, userID uint) (*models.SignalJoinRequest, error)
+	UpdateJoinRequest(request *models.SignalJoinRequest) error
+	UpdateJoinRequestTx(tx interface{}, request *models.SignalJoinRequest) error
+	GetUserJoinRequests(signalID, userID uint) ([]models.SignalJoinRequest, error)
+	GetPendingJoinRequests(signalID uint) ([]models.SignalJoinRequest, error)
+	GetUserJoinRequestsPaginated(userID uint, page, limit int) ([]models.SignalJoinRequest, int64, error)
+	DeleteExpiredJoinRequests() error
 }
 
 type SignalRepository struct {
@@ -402,4 +414,117 @@ func (r *SignalRepository) CreateParticipantTx(tx interface{}, participant *mode
 		return fmt.Errorf("invalid transaction type")
 	}
 	return gormTx.Create(participant).Error
+}
+
+// GetHourlySignalCount 시간당 시그널 생성 개수 조회
+func (r *SignalRepository) GetHourlySignalCount(userID uint, date time.Time) (int64, error) {
+	var count int64
+	
+	startOfHour := time.Date(date.Year(), date.Month(), date.Day(), date.Hour(), 0, 0, 0, date.Location())
+	endOfHour := startOfHour.Add(time.Hour)
+	
+	err := r.db.Model(&models.Signal{}).
+		Where("creator_id = ? AND created_at >= ? AND created_at < ?", userID, startOfHour, endOfHour).
+		Count(&count).Error
+		
+	return count, err
+}
+
+// IncrementParticipantCountTx 트랜잭션 내에서 참여자 수 증가
+func (r *SignalRepository) IncrementParticipantCountTx(tx interface{}, signalID uint) error {
+	gormTx, ok := tx.(*gorm.DB)
+	if !ok {
+		return fmt.Errorf("invalid transaction type")
+	}
+	
+	return gormTx.Model(&models.Signal{}).
+		Where("id = ?", signalID).
+		Update("current_participants", gorm.Expr("current_participants + 1")).Error
+}
+
+// ============================================================================
+// ENHANCED JOIN REQUEST SYSTEM REPOSITORY METHODS
+// ============================================================================
+
+// CreateJoinRequest 참여 요청 생성
+func (r *SignalRepository) CreateJoinRequest(request *models.SignalJoinRequest) error {
+	return r.db.Create(request).Error
+}
+
+// GetJoinRequest 특정 참여 요청 조회
+func (r *SignalRepository) GetJoinRequest(signalID, userID uint) (*models.SignalJoinRequest, error) {
+	var request models.SignalJoinRequest
+	err := r.db.Preload("User.Profile").
+		Preload("Signal").
+		Where("signal_id = ? AND user_id = ?", signalID, userID).
+		Where("status = ?", models.JoinRequestPending).
+		First(&request).Error
+	
+	if err != nil {
+		return nil, err
+	}
+	return &request, nil
+}
+
+// UpdateJoinRequest 참여 요청 업데이트
+func (r *SignalRepository) UpdateJoinRequest(request *models.SignalJoinRequest) error {
+	return r.db.Save(request).Error
+}
+
+// UpdateJoinRequestTx 트랜잭션 내에서 참여 요청 업데이트
+func (r *SignalRepository) UpdateJoinRequestTx(tx interface{}, request *models.SignalJoinRequest) error {
+	gormTx, ok := tx.(*gorm.DB)
+	if !ok {
+		return fmt.Errorf("invalid transaction type")
+	}
+	return gormTx.Save(request).Error
+}
+
+// GetUserJoinRequests 사용자의 특정 시그널에 대한 모든 참여 요청 조회
+func (r *SignalRepository) GetUserJoinRequests(signalID, userID uint) ([]models.SignalJoinRequest, error) {
+	var requests []models.SignalJoinRequest
+	err := r.db.Where("signal_id = ? AND user_id = ?", signalID, userID).
+		Order("created_at DESC").
+		Find(&requests).Error
+	return requests, err
+}
+
+// GetPendingJoinRequests 시그널의 대기중인 참여 요청들 조회
+func (r *SignalRepository) GetPendingJoinRequests(signalID uint) ([]models.SignalJoinRequest, error) {
+	var requests []models.SignalJoinRequest
+	err := r.db.Preload("User.Profile").
+		Where("signal_id = ? AND status = ?", signalID, models.JoinRequestPending).
+		Where("expires_at > ?", time.Now()).
+		Order("created_at ASC").
+		Find(&requests).Error
+	return requests, err
+}
+
+// GetUserJoinRequestsPaginated 사용자의 모든 참여 요청을 페이지네이션으로 조회
+func (r *SignalRepository) GetUserJoinRequestsPaginated(userID uint, page, limit int) ([]models.SignalJoinRequest, int64, error) {
+	var requests []models.SignalJoinRequest
+	var total int64
+
+	query := r.db.Model(&models.SignalJoinRequest{}).
+		Preload("Signal.Creator.Profile").
+		Where("user_id = ?", userID)
+
+	// 총 개수 계산
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// 페이지네이션
+	offset := utils.CalculateOffset(page, limit)
+	err := query.Offset(offset).Limit(limit).
+		Order("created_at DESC").
+		Find(&requests).Error
+
+	return requests, total, err
+}
+
+// DeleteExpiredJoinRequests 만료된 참여 요청들 정리
+func (r *SignalRepository) DeleteExpiredJoinRequests() error {
+	return r.db.Where("expires_at < ? AND status = ?", time.Now(), models.JoinRequestPending).
+		Delete(&models.SignalJoinRequest{}).Error
 }

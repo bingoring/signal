@@ -236,3 +236,208 @@ func (h *SignalHandler) GetNearbySignals(c *gin.Context) {
 		},
 	})
 }
+
+// ============================================================================
+// ENHANCED JOIN REQUEST SYSTEM HANDLERS - Sprint 2
+// ============================================================================
+
+// CreateJoinRequest handles POST /api/v1/signals/:id/join-requests
+func (h *SignalHandler) CreateJoinRequest(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	
+	signalID, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		utils.BadRequestResponse(c, "유효하지 않은 시그널 ID입니다")
+		return
+	}
+
+	var req models.CreateJoinRequestRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.BadRequestResponse(c, "잘못된 요청 데이터입니다")
+		return
+	}
+
+	// Extract user context for rate limiting
+	userIP := c.ClientIP()
+	userAgent := c.GetHeader("User-Agent")
+
+	joinRequest, err := h.signalService.CreateJoinRequest(uint(signalID), userID, &req, userIP, userAgent)
+	if err != nil {
+		utils.BadRequestResponse(c, err.Error())
+		return
+	}
+
+	utils.CreatedResponse(c, "참여 요청이 생성되었습니다", joinRequest)
+}
+
+// ApproveJoinRequest handles PUT /api/v1/signals/:id/join-requests/:user_id/approve
+func (h *SignalHandler) ApproveJoinRequest(c *gin.Context) {
+	creatorID := c.GetUint("user_id")
+	
+	signalID, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		utils.BadRequestResponse(c, "유효하지 않은 시그널 ID입니다")
+		return
+	}
+
+	participantID, err := strconv.ParseUint(c.Param("user_id"), 10, 32)
+	if err != nil {
+		utils.BadRequestResponse(c, "유효하지 않은 사용자 ID입니다")
+		return
+	}
+
+	var req models.ApproveJoinRequestRequest
+	req.UserID = uint(participantID) // Set from URL parameter
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// Allow empty body, just set default message
+		req.Message = "참여가 승인되었습니다"
+	}
+
+	if err := h.signalService.ApproveJoinRequest(uint(signalID), creatorID, uint(participantID), &req); err != nil {
+		utils.BadRequestResponse(c, err.Error())
+		return
+	}
+
+	utils.SuccessResponse(c, "참여 요청을 승인했습니다", nil)
+}
+
+// RejectJoinRequest handles PUT /api/v1/signals/:id/join-requests/:user_id/reject
+func (h *SignalHandler) RejectJoinRequest(c *gin.Context) {
+	creatorID := c.GetUint("user_id")
+	
+	signalID, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		utils.BadRequestResponse(c, "유효하지 않은 시그널 ID입니다")
+		return
+	}
+
+	participantID, err := strconv.ParseUint(c.Param("user_id"), 10, 32)
+	if err != nil {
+		utils.BadRequestResponse(c, "유효하지 않은 사용자 ID입니다")
+		return
+	}
+
+	var req models.RejectJoinRequestRequest
+	req.UserID = uint(participantID) // Set from URL parameter
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.BadRequestResponse(c, "거절 사유가 필요합니다")
+		return
+	}
+
+	if err := h.signalService.RejectJoinRequest(uint(signalID), creatorID, uint(participantID), &req); err != nil {
+		utils.BadRequestResponse(c, err.Error())
+		return
+	}
+
+	utils.SuccessResponse(c, "참여 요청을 거절했습니다", nil)
+}
+
+// GetPendingJoinRequests handles GET /api/v1/signals/:id/join-requests
+func (h *SignalHandler) GetPendingJoinRequests(c *gin.Context) {
+	creatorID := c.GetUint("user_id")
+	
+	signalID, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		utils.BadRequestResponse(c, "유효하지 않은 시그널 ID입니다")
+		return
+	}
+
+	requests, err := h.signalService.GetPendingJoinRequests(uint(signalID), creatorID)
+	if err != nil {
+		utils.BadRequestResponse(c, err.Error())
+		return
+	}
+
+	utils.SuccessResponse(c, "대기중인 참여 요청 조회 완료", gin.H{
+		"requests": requests,
+		"count":    len(requests),
+	})
+}
+
+// GetMyJoinRequests handles GET /api/v1/my/join-requests
+func (h *SignalHandler) GetMyJoinRequests(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+
+	requests, pagination, err := h.signalService.GetMyJoinRequests(userID, page, limit)
+	if err != nil {
+		utils.InternalServerErrorResponse(c, "참여 요청 조회에 실패했습니다", err)
+		return
+	}
+
+	utils.PagedSuccessResponse(c, "내 참여 요청 조회 완료", requests, *pagination)
+}
+
+// ============================================================================
+// ENHANCED SIGNAL MANAGEMENT HANDLERS
+// ============================================================================
+
+// UpdateSignalStatus handles PUT /api/v1/signals/:id/status
+func (h *SignalHandler) UpdateSignalStatus(c *gin.Context) {
+	signalID, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		utils.BadRequestResponse(c, "유효하지 않은 시그널 ID입니다")
+		return
+	}
+
+	var req struct {
+		Status models.SignalStatus `json:"status" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.BadRequestResponse(c, "유효한 상태값이 필요합니다")
+		return
+	}
+
+	if err := h.signalService.UpdateSignalStatus(uint(signalID), req.Status); err != nil {
+		utils.BadRequestResponse(c, err.Error())
+		return
+	}
+
+	utils.SuccessResponse(c, "시그널 상태가 업데이트되었습니다", nil)
+}
+
+// CancelSignal handles POST /api/v1/signals/:id/cancel
+func (h *SignalHandler) CancelSignal(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	
+	signalID, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		utils.BadRequestResponse(c, "유효하지 않은 시그널 ID입니다")
+		return
+	}
+
+	var req struct {
+		Reason string `json:"reason" binding:"required,max=300"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.BadRequestResponse(c, "취소 사유가 필요합니다")
+		return
+	}
+
+	if err := h.signalService.CancelSignal(uint(signalID), userID, req.Reason); err != nil {
+		utils.BadRequestResponse(c, err.Error())
+		return
+	}
+
+	utils.SuccessResponse(c, "시그널이 취소되었습니다", nil)
+}
+
+// CompleteSignal handles POST /api/v1/signals/:id/complete
+func (h *SignalHandler) CompleteSignal(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	
+	signalID, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		utils.BadRequestResponse(c, "유효하지 않은 시그널 ID입니다")
+		return
+	}
+
+	if err := h.signalService.CompleteSignal(uint(signalID), userID); err != nil {
+		utils.BadRequestResponse(c, err.Error())
+		return
+	}
+
+	utils.SuccessResponse(c, "시그널이 완료되었습니다", nil)
+}
