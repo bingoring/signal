@@ -125,6 +125,80 @@ type SignalWithDistance struct {
 	Distance float64 `json:"distance"` // 미터 단위
 }
 
+// Join Request Models for enhanced workflow
+type JoinRequestStatus string
+
+const (
+	JoinRequestPending  JoinRequestStatus = "pending"  // 승인 대기
+	JoinRequestApproved JoinRequestStatus = "approved" // 승인됨
+	JoinRequestRejected JoinRequestStatus = "rejected" // 거절됨
+	JoinRequestExpired  JoinRequestStatus = "expired"  // 만료됨
+)
+
+type SignalJoinRequest struct {
+	ID       uint              `json:"id" gorm:"primaryKey"`
+	SignalID uint              `json:"signal_id" gorm:"not null;index"`
+	UserID   uint              `json:"user_id" gorm:"not null;index"`
+	Status   JoinRequestStatus `json:"status" gorm:"default:'pending';index"`
+	Message  string            `json:"message" gorm:"size:200"`
+	
+	// Rate limiting and validation
+	UserIP       string     `json:"-" gorm:"size:45"` // IPv6 support
+	UserAgent    string     `json:"-" gorm:"size:500"`
+	RetryCount   int        `json:"-" gorm:"default:0"`
+	LastRetryAt  *time.Time `json:"-"`
+	
+	// Approval workflow
+	ApprovedBy   *uint      `json:"approved_by,omitempty"`
+	ApprovedAt   *time.Time `json:"approved_at,omitempty"`
+	RejectedBy   *uint      `json:"rejected_by,omitempty"`
+	RejectedAt   *time.Time `json:"rejected_at,omitempty"`
+	RejectionReason string  `json:"rejection_reason,omitempty" gorm:"size:300"`
+	
+	// Expiration
+	ExpiresAt time.Time `json:"expires_at" gorm:"not null;index"`
+	
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
+
+	// Relations
+	Signal     Signal `json:"signal,omitempty" gorm:"foreignKey:SignalID"`
+	User       User   `json:"user,omitempty" gorm:"foreignKey:UserID"`
+	Approver   *User  `json:"approver,omitempty" gorm:"foreignKey:ApprovedBy"`
+	Rejector   *User  `json:"rejector,omitempty" gorm:"foreignKey:RejectedBy"`
+}
+
+// Enhanced join request with validation and rate limiting
+type CreateJoinRequestRequest struct {
+	Message string `json:"message" binding:"max=200"`
+}
+
+type ApproveJoinRequestRequest struct {
+	UserID uint   `json:"user_id" binding:"required"`
+	Message string `json:"message" binding:"max=300"`
+}
+
+type RejectJoinRequestRequest struct {
+	UserID uint   `json:"user_id" binding:"required"`
+	Reason string `json:"reason" binding:"required,max=300"`
+}
+
+// Signal management enhancements
+type SignalNotificationPreference struct {
+	ID       uint `json:"id" gorm:"primaryKey"`
+	SignalID uint `json:"signal_id" gorm:"not null;index"`
+	UserID   uint `json:"user_id" gorm:"not null;index"`
+	
+	NotifyOnJoin     bool `json:"notify_on_join" gorm:"default:true"`
+	NotifyOnLeave    bool `json:"notify_on_leave" gorm:"default:true"`
+	NotifyOnApproval bool `json:"notify_on_approval" gorm:"default:true"`
+	NotifyOnMessage  bool `json:"notify_on_message" gorm:"default:true"`
+	
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // PostGIS 헬퍼 메서드들
 func (s *Signal) SetLocationFromCoordinates() {
 	s.Location = fmt.Sprintf("POINT(%f %f)", s.Longitude, s.Latitude)

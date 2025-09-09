@@ -149,6 +149,33 @@ func (l *Logger) LogPushNotificationSent(ctx context.Context, userIDs []uint, ti
 	l.log(INFO, "푸시 알림을 발송했습니다", nil, nil, extra)
 }
 
+// Join Request 관련 로그
+func (l *Logger) LogJoinRequestCreated(ctx context.Context, requestID uint, signalID uint, userID uint) {
+	extra := map[string]interface{}{
+		"action":     "join_request_created",
+		"request_id": requestID,
+	}
+	l.log(INFO, "참여 요청이 생성되었습니다", &userID, &signalID, extra)
+}
+
+func (l *Logger) LogJoinRequestApproved(ctx context.Context, requestID uint, signalID uint, userID uint, approverID uint) {
+	extra := map[string]interface{}{
+		"action":      "join_request_approved",
+		"request_id":  requestID,
+		"approver_id": approverID,
+	}
+	l.log(INFO, "참여 요청이 승인되었습니다", &userID, &signalID, extra)
+}
+
+func (l *Logger) LogJoinRequestRejected(ctx context.Context, requestID uint, signalID uint, userID uint, rejectorID uint) {
+	extra := map[string]interface{}{
+		"action":      "join_request_rejected",
+		"request_id":  requestID,
+		"rejector_id": rejectorID,
+	}
+	l.log(INFO, "참여 요청이 거절되었습니다", &userID, &signalID, extra)
+}
+
 // 컨텍스트에서 사용자 ID 추출 (미들웨어에서 설정됨)
 func (l *Logger) getUserIDFromContext(ctx context.Context) *uint {
 	if userID, exists := ctx.Value("user_id").(uint); exists {

@@ -26,6 +26,7 @@ const (
 	JobSendPushNotification JobType = "send_push_notification"
 	JobExpireSignal        JobType = "expire_signal"
 	JobExpireChatRoom      JobType = "expire_chat_room"
+	JobExpireJoinRequest   JobType = "expire_join_request"
 	JobSendEmail           JobType = "send_email"
 	JobUpdateMannerScore   JobType = "update_manner_score"
 	JobCleanupData         JobType = "cleanup_data"
@@ -57,6 +58,11 @@ type ExpireSignalPayload struct {
 // 채팅방 만료 작업 페이로드
 type ExpireChatRoomPayload struct {
 	ChatRoomID uint `json:"chat_room_id"`
+}
+
+// 참여 요청 만료 작업 페이로드
+type ExpireJoinRequestPayload struct {
+	JoinRequestID uint `json:"join_request_id"`
 }
 
 // 이메일 발송 작업 페이로드
@@ -259,6 +265,20 @@ func (q *Queue) ScheduleChatRoomExpiration(ctx context.Context, chatRoomID uint,
 
 	job := &Job{
 		Type:    JobExpireChatRoom,
+		Payload: payload,
+	}
+
+	return q.Schedule(ctx, job, expiresAt)
+}
+
+// 참여 요청 만료 작업 스케줄링
+func (q *Queue) ScheduleJoinRequestExpiration(ctx context.Context, joinRequestID uint, expiresAt time.Time) error {
+	payload := map[string]interface{}{
+		"join_request_id": joinRequestID,
+	}
+
+	job := &Job{
+		Type:    JobExpireJoinRequest,
 		Payload: payload,
 	}
 
