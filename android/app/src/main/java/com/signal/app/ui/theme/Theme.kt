@@ -16,15 +16,28 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
 private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    secondary = PurpleGrey80,
-    tertiary = Pink80
+    primary = ChatColors.Primary,
+    secondary = ChatColors.Secondary,
+    tertiary = ChatColors.Tertiary,
+    background = ChatColors.TextPrimary,
+    surface = Color(0xFF1A1A1A),
+    onPrimary = ChatColors.TextOnPrimary,
+    onSecondary = ChatColors.TextOnPrimary,
+    onBackground = ChatColors.TextOnPrimary,
+    onSurface = ChatColors.TextOnPrimary
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40
+    primary = ChatColors.Primary,
+    secondary = ChatColors.Secondary,
+    tertiary = ChatColors.Tertiary,
+    background = ChatColors.Background,
+    surface = ChatColors.Surface,
+    onPrimary = ChatColors.TextOnPrimary,
+    onSecondary = ChatColors.TextOnPrimary,
+    onBackground = ChatColors.TextPrimary,
+    onSurface = ChatColors.TextPrimary,
+    outline = ChatColors.Divider
 )
 
 @Composable
