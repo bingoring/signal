@@ -9,9 +9,11 @@ import (
 type ChatRoomStatus string
 
 const (
-	ChatRoomActive  ChatRoomStatus = "active"  // 활성화
-	ChatRoomExpired ChatRoomStatus = "expired" // 만료됨 (24시간 후)
-	ChatRoomClosed  ChatRoomStatus = "closed"  // 강제 종료
+	ChatRoomActive    ChatRoomStatus = "active"     // 활성화 - 채팅 진행 중
+	ChatRoomMeeting   ChatRoomStatus = "meeting"    // 모임 진행 중 - 시그널 시작 시간 도달
+	ChatRoomCompleted ChatRoomStatus = "completed"  // 모임 완료 - 성공적 마무리
+	ChatRoomExpired   ChatRoomStatus = "expired"    // 만료됨 - 24시간 후 자동 만료
+	ChatRoomClosed    ChatRoomStatus = "closed"     // 강제 종료 - 관리자 또는 주최자가 종료
 )
 
 type ChatRoom struct {
@@ -34,11 +36,15 @@ type ChatRoom struct {
 type MessageType string
 
 const (
-	MessageText   MessageType = "text"   // 텍스트 메시지
-	MessageImage  MessageType = "image"  // 이미지
-	MessageSystem MessageType = "system" // 시스템 메시지
-	MessageJoin   MessageType = "join"   // 참여 알림
-	MessageLeave  MessageType = "leave"  // 나가기 알림
+	MessageText        MessageType = "text"         // 텍스트 메시지
+	MessageImage       MessageType = "image"        // 이미지
+	MessageLocation    MessageType = "location"     // 위치 공유
+	MessageQuickReply  MessageType = "quick_reply"  // 빠른 응답 ("도착했어요", "5분 늦을게요" 등)
+	MessageSystem      MessageType = "system"       // 시스템 메시지
+	MessageJoin        MessageType = "join"         // 참여 알림
+	MessageLeave       MessageType = "leave"        // 나가기 알림
+	MessageCountdown   MessageType = "countdown"    // 모임 카운트다운
+	MessageStatus      MessageType = "status"       // 모임 상태 변경
 )
 
 type ChatMessage struct {
@@ -48,6 +54,14 @@ type ChatMessage struct {
 	Type       MessageType `json:"type" gorm:"default:'text'"`
 	Content    string      `json:"content" gorm:"size:1000;not null"`
 	ImageURL   string      `json:"image_url"`
+	
+	// 위치 정보 (location 타입일 때)
+	Latitude  *float64 `json:"latitude,omitempty"`
+	Longitude *float64 `json:"longitude,omitempty"`
+	Address   string   `json:"address,omitempty" gorm:"size:500"`
+	
+	// 빠른 응답 타입 (quick_reply 타입일 때)
+	QuickReplyType string `json:"quick_reply_type,omitempty" gorm:"size:50"` // "arrived", "late_5min", "late_10min", "cancel" 등
 	
 	// 메시지 상태
 	IsEdited bool       `json:"is_edited" gorm:"default:false"`
@@ -63,9 +77,13 @@ type ChatMessage struct {
 
 // DTO 구조체들
 type SendMessageRequest struct {
-	Type     MessageType `json:"type" binding:"required,oneof=text image"`
-	Content  string      `json:"content" binding:"required,max=1000"`
-	ImageURL string      `json:"image_url"`
+	Type           MessageType `json:"type" binding:"required,oneof=text image location quick_reply"`
+	Content        string      `json:"content" binding:"required,max=1000"`
+	ImageURL       string      `json:"image_url"`
+	Latitude       *float64    `json:"latitude,omitempty"`
+	Longitude      *float64    `json:"longitude,omitempty"`
+	Address        string      `json:"address,omitempty"`
+	QuickReplyType string      `json:"quick_reply_type,omitempty"`
 }
 
 type ChatRoomInfo struct {
@@ -86,6 +104,15 @@ type MessageWithUser struct {
 	Type       MessageType `json:"type"`
 	Content    string      `json:"content"`
 	ImageURL   string      `json:"image_url"`
+	
+	// 위치 정보
+	Latitude  *float64 `json:"latitude,omitempty"`
+	Longitude *float64 `json:"longitude,omitempty"`
+	Address   string   `json:"address,omitempty"`
+	
+	// 빠른 응답
+	QuickReplyType string `json:"quick_reply_type,omitempty"`
+	
 	IsEdited   bool        `json:"is_edited"`
 	EditedAt   *time.Time  `json:"edited_at"`
 	CreatedAt  time.Time   `json:"created_at"`
