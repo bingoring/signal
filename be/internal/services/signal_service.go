@@ -35,6 +35,7 @@ type SignalService struct {
 	queue           *queue.Queue
 	logger          *logger.Logger
 	websocketService *WebSocketService
+	chatService     *ChatService
 }
 
 func NewSignalService(
@@ -44,6 +45,7 @@ func NewSignalService(
 	queue *queue.Queue,
 	logger *logger.Logger,
 	websocketService *WebSocketService,
+	chatService *ChatService,
 ) SignalServiceInterface {
 	service := &SignalService{
 		signalRepo:       signalRepo,
@@ -52,6 +54,7 @@ func NewSignalService(
 		queue:            queue,
 		logger:           logger,
 		websocketService: websocketService,
+		chatService:      chatService,
 	}
 	
 	// 서비스 시작 시 활성 시그널들을 캐시에 로드
@@ -438,6 +441,13 @@ func (s *SignalService) ApproveParticipant(signalID, creatorID, userID uint) err
 		return fmt.Errorf("참여자 승인에 실패했습니다")
 	}
 
+	// 첫 번째 참여자 승인 시 채팅방 자동 생성
+	go func() {
+		if err := s.createSignalChatRoom(signalID); err != nil {
+			s.logger.Error("첫 참여자 승인 후 채팅방 생성 실패", err)
+		}
+	}()
+
 	// 시그널 참여자 변경 실시간 알림
 	go s.NotifySignalParticipantChange(signalID)
 
@@ -646,8 +656,31 @@ func (s *SignalService) validateSignalSettings(req *models.CreateSignalRequest) 
 
 // createSignalChatRoom 시그널 채팅방 자동 생성
 func (s *SignalService) createSignalChatRoom(signalID uint) error {
-	// TODO: 채팅 서비스가 구현되면 연동
-	s.logger.Info(fmt.Sprintf("시그널 %d 채팅방 생성 예약", signalID))
+	if s.chatService == nil {
+		s.logger.Warn("ChatService가 초기화되지 않아 채팅방 생성을 건너뜁니다")
+		return nil
+	}
+
+	// 시그널 정보 확인
+	signal, err := s.signalRepo.GetByID(signalID)
+	if err != nil {
+		return fmt.Errorf("시그널 조회 실패: %v", err)
+	}
+
+	// 이미 채팅방이 존재하는지 확인
+	existingRoom, _ := s.chatService.GetChatRoomBySignalID(signalID)
+	if existingRoom != nil {
+		s.logger.Info(fmt.Sprintf("시그널 %d의 채팅방이 이미 존재합니다", signalID))
+		return nil
+	}
+
+	// 채팅방 생성
+	room, err := s.chatService.CreateChatRoom(signalID)
+	if err != nil {
+		return fmt.Errorf("채팅방 생성 실패: %v", err)
+	}
+
+	s.logger.Info(fmt.Sprintf("시그널 %d 채팅방 생성 완료 (ID: %d)", signalID, room.ID))
 	return nil
 }
 
