@@ -29,8 +29,16 @@ type ChatMessage struct {
 	UserID    uint      `json:"user_id"`
 	Username  string    `json:"username"`
 	Content   string    `json:"content"`
-	Type      string    `json:"type"` // text, image, location, system
+	Type      string    `json:"type"` // text, image, location, quick_reply, system
 	Timestamp time.Time `json:"timestamp"`
+	
+	// 위치 정보 (location 타입일 때)
+	Latitude  *float64 `json:"latitude,omitempty"`
+	Longitude *float64 `json:"longitude,omitempty"`
+	Address   string   `json:"address,omitempty"`
+	
+	// 빠른 응답 (quick_reply 타입일 때)
+	QuickReplyType string `json:"quick_reply_type,omitempty"`
 }
 
 type ChatClient struct {
@@ -320,10 +328,14 @@ func (room *ChatRoom) saveMessage(message *ChatMessage, cws *ChatWebSocketServic
 	}
 
 	dbMessage := &models.ChatMessage{
-		ChatRoomID: dbRoom.ID,
-		UserID:     userID,
-		Content:    message.Content,
-		Type:       msgType,
+		ChatRoomID:     dbRoom.ID,
+		UserID:         userID,
+		Content:        message.Content,
+		Type:           msgType,
+		Latitude:       message.Latitude,
+		Longitude:      message.Longitude,
+		Address:        message.Address,
+		QuickReplyType: message.QuickReplyType,
 	}
 
 	if err := cws.db.Create(dbMessage).Error; err != nil {
@@ -390,11 +402,11 @@ func (c *ChatClient) readPump() {
 		content, contentOk := msgData["content"].(string)
 		msgType, typeOk := msgData["type"].(string)
 
-		if !contentOk || !typeOk || content == "" {
+		if !typeOk {
 			continue
 		}
 
-		// Create message
+		// Create base message
 		message := &ChatMessage{
 			RoomID:    c.Room.ID,
 			UserID:    c.UserID,
@@ -402,6 +414,43 @@ func (c *ChatClient) readPump() {
 			Content:   content,
 			Type:      msgType,
 			Timestamp: time.Now(),
+		}
+
+		// Process different message types
+		switch msgType {
+		case "text", "image":
+			if !contentOk || content == "" {
+				continue
+			}
+		case "location":
+			// 위치 정보 처리
+			if lat, ok := msgData["latitude"].(float64); ok {
+				message.Latitude = &lat
+			}
+			if lon, ok := msgData["longitude"].(float64); ok {
+				message.Longitude = &lon
+			}
+			if addr, ok := msgData["address"].(string); ok {
+				message.Address = addr
+			}
+			if message.Content == "" {
+				message.Content = "위치를 공유했습니다"
+			}
+		case "quick_reply":
+			// 빠른 응답 처리
+			if qrType, ok := msgData["quick_reply_type"].(string); ok {
+				message.QuickReplyType = qrType
+				// 빠른 응답 타입에 따라 기본 메시지 설정
+				if message.Content == "" {
+					message.Content = generateQuickReplyContent(qrType)
+				}
+			} else {
+				continue // quick_reply_type이 없으면 무시
+			}
+		default:
+			if !contentOk || content == "" {
+				continue
+			}
 		}
 
 		// Send to room
@@ -517,4 +566,24 @@ func (cws *ChatWebSocketService) CleanupExpiredMessages() error {
 	
 	cws.logger.Printf("Cleaned up %d expired messages", result.RowsAffected)
 	return nil
+}
+
+// generateQuickReplyContent generates content for quick reply messages
+func generateQuickReplyContent(quickReplyType string) string {
+	switch quickReplyType {
+	case "arrived":
+		return "도착했어요! 📍"
+	case "late_5min":
+		return "5분 늦을게요 😅"
+	case "late_10min":
+		return "10분 늦을게요 😅"
+	case "late_15min":
+		return "15분 늦을게요 😅"
+	case "cancel":
+		return "죄송합니다, 참석이 어려워졌어요 😢"
+	case "on_way":
+		return "지금 가는 중이에요! 🚶‍♂️"
+	default:
+		return "빠른 응답"
+	}
 }
