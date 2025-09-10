@@ -4,14 +4,24 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'dart:convert';
 import 'dart:async';
 
+import '../widgets/instagram_style_app_bar.dart';
+import '../widgets/message_bubbles.dart';
+import '../widgets/chat_theme.dart';
+import '../widgets/enhanced_message_input.dart';
+import '../widgets/quick_action_panel.dart';
+
 class ChatRoomPage extends StatefulWidget {
   final String roomId;
   final String roomName;
+  final SignalStatus signalStatus;
+  final List<String> participantAvatars;
   
   const ChatRoomPage({
     super.key, 
     required this.roomId,
     this.roomName = '채팅방',
+    this.signalStatus = SignalStatus.active,
+    this.participantAvatars = const [],
   });
 
   @override
@@ -20,16 +30,17 @@ class ChatRoomPage extends StatefulWidget {
 
 class _ChatRoomPageState extends State<ChatRoomPage>
     with TickerProviderStateMixin {
-  final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   
   WebSocketChannel? _channel;
   List<ChatMessage> _messages = [];
+  List<String> _typingUsers = [];
   bool _isConnecting = true;
   int _onlineCount = 0;
   Timer? _reconnectTimer;
+  Timer? _typingTimer;
 
   @override
   void initState() {
@@ -122,7 +133,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
 
   void _loadInitialMessages() {
     // TODO: API에서 이전 메시지들 로드
-    // 임시 데이터
+    // 임시 데이터 - 다양한 메시지 타입 예시
     setState(() {
       _messages = [
         ChatMessage(
@@ -130,11 +141,19 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           content: '안녕하세요! 시그널에 참여해주셔서 감사합니다 😊',
           senderId: 'system',
           senderName: '시스템',
-          timestamp: DateTime.now().subtract(const Duration(minutes: 30)),
+          timestamp: DateTime.now().subtract(const Duration(minutes: 35)),
           type: MessageType.system,
         ),
         ChatMessage(
           id: '2',
+          content: '⏰ 모임 시작까지 30분 남았습니다!',
+          senderId: 'system',
+          senderName: '시스템',
+          timestamp: DateTime.now().subtract(const Duration(minutes: 30)),
+          type: MessageType.countdown,
+        ),
+        ChatMessage(
+          id: '3',
           content: '모임 장소는 정확히 어디인가요?',
           senderId: 'user1',
           senderName: '김철수',
@@ -142,11 +161,40 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           type: MessageType.text,
         ),
         ChatMessage(
-          id: '3',
-          content: '스타벅스 강남점 입구에서 만나요!',
+          id: '4',
+          content: '여기서 만나요!',
           senderId: 'current_user_id',
           senderName: '나',
           timestamp: DateTime.now().subtract(const Duration(minutes: 20)),
+          type: MessageType.location,
+          latitude: 37.5665,
+          longitude: 126.9780,
+          address: '서울특별시 중구 명동길 26',
+        ),
+        ChatMessage(
+          id: '5',
+          content: '도착했어요! 📍',
+          senderId: 'user2',
+          senderName: '박영희',
+          timestamp: DateTime.now().subtract(const Duration(minutes: 15)),
+          type: MessageType.quickReply,
+          quickReplyType: QuickReplyType.arrived,
+        ),
+        ChatMessage(
+          id: '6',
+          content: '5분 늦을게요 😅',
+          senderId: 'user3',
+          senderName: '이민수',
+          timestamp: DateTime.now().subtract(const Duration(minutes: 10)),
+          type: MessageType.quickReply,
+          quickReplyType: QuickReplyType.late5min,
+        ),
+        ChatMessage(
+          id: '7',
+          content: '모든 분들 오셨네요! 즐거운 시간 보내세요!',
+          senderId: 'current_user_id',
+          senderName: '나',
+          timestamp: DateTime.now().subtract(const Duration(minutes: 5)),
           type: MessageType.text,
         ),
       ];
@@ -185,9 +233,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   @override
   void dispose() {
     _animationController.dispose();
-    _messageController.dispose();
     _scrollController.dispose();
     _reconnectTimer?.cancel();
+    _typingTimer?.cancel();
     _channel?.sink.close();
     super.dispose();
   }
@@ -195,14 +243,49 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: _buildAppBar(),
+      backgroundColor: ChatColors.background,
+      appBar: InstagramStyleAppBar(
+        signalTitle: widget.roomName,
+        participantAvatars: widget.participantAvatars,
+        status: widget.signalStatus,
+        onlineCount: _onlineCount,
+        onInfoPressed: () {
+          // TODO: 시그널 정보 페이지로 이동
+          print('시그널 정보 보기');
+        },
+        onMenuPressed: () {
+          // TODO: 메뉴 표시
+          print('메뉴 열기');
+        },
+      ),
       body: FadeTransition(
         opacity: _fadeAnimation,
         child: Column(
           children: [
             _buildConnectionStatus(),
-            Expanded(child: _buildMessageList()),
-            _buildMessageInput(),
+            Expanded(
+              child: Stack(
+                children: [
+                  _buildMessageList(),
+                  if (_typingUsers.isNotEmpty)
+                    Positioned(
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      child: Container(
+                        color: ChatColors.background.withOpacity(0.9),
+                        child: TypingIndicator(typingUsers: _typingUsers),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            EnhancedMessageInput(
+              onSendMessage: _sendMessage,
+              onQuickReply: _sendQuickReply,
+              onLocationShare: _shareLocation,
+              onImagePicker: _pickImage,
+            ),
           ],
         ),
       ),
@@ -270,21 +353,21 @@ class _ChatRoomPageState extends State<ChatRoomPage>
 
   Widget _buildMessageList() {
     if (_messages.isEmpty) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
               Icons.chat_bubble_outline,
               size: 64,
-              color: Colors.grey,
+              color: ChatColors.textSecondary,
             ),
-            SizedBox(height: 16),
+            const SizedBox(height: ChatDimensions.paddingMD),
             Text(
               '채팅을 시작해보세요!',
-              style: TextStyle(
+              style: ChatTextStyles.systemText.copyWith(
                 fontSize: 16,
-                color: Colors.grey,
+                color: ChatColors.textSecondary,
               ),
             ),
           ],
@@ -294,14 +377,76 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     
     return ListView.builder(
       controller: _scrollController,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(
+        horizontal: ChatDimensions.paddingXS,
+        vertical: ChatDimensions.paddingSM,
+      ),
       itemCount: _messages.length,
       itemBuilder: (context, index) {
         final message = _messages[index];
         final isMe = message.senderId == 'current_user_id';
         
-        return _buildMessageBubble(message, isMe);
+        return MessageBubble(
+          message: message,
+          isMe: isMe,
+          onTap: () => _handleMessageTap(message),
+          onLongPress: () => _handleMessageLongPress(message),
+        );
       },
+    );
+  }
+  
+  void _handleMessageTap(ChatMessage message) {
+    // 메시지 탭 처리
+    HapticFeedback.selectionClick();
+  }
+  
+  void _handleMessageLongPress(ChatMessage message) {
+    // 메시지 롱프레스 처리 (복사, 삭제 등)
+    HapticFeedback.heavyImpact();
+    _showMessageOptions(message);
+  }
+  
+  void _showMessageOptions(ChatMessage message) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: ChatColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(ChatDimensions.radiusMD),
+        ),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: ChatDimensions.paddingMD,
+          vertical: ChatDimensions.paddingLG,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.copy, color: ChatColors.textPrimary),
+              title: const Text('복사'),
+              onTap: () {
+                Clipboard.setData(ClipboardData(text: message.content));
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('메시지가 복사되었습니다')),
+                );
+              },
+            ),
+            if (message.senderId == 'current_user_id')
+              ListTile(
+                leading: const Icon(Icons.delete, color: ChatColors.accent),
+                title: const Text('삭제'),
+                onTap: () {
+                  Navigator.pop(context);
+                  // TODO: 메시지 삭제 구현
+                },
+              ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -509,6 +654,20 @@ class ChatMessage {
   final String senderName;
   final DateTime timestamp;
   final MessageType type;
+  
+  // 위치 정보
+  final double? latitude;
+  final double? longitude;
+  final String? address;
+  
+  // 빠른 응답
+  final QuickReplyType? quickReplyType;
+  
+  // 이미지
+  final String? imageUrl;
+  
+  // 읽음 상태
+  final bool isRead;
 
   ChatMessage({
     required this.id,
@@ -517,6 +676,12 @@ class ChatMessage {
     required this.senderName,
     required this.timestamp,
     this.type = MessageType.text,
+    this.latitude,
+    this.longitude,
+    this.address,
+    this.quickReplyType,
+    this.imageUrl,
+    this.isRead = false,
   });
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
@@ -530,6 +695,17 @@ class ChatMessage {
         (e) => e.toString().split('.').last == json['type'],
         orElse: () => MessageType.text,
       ),
+      latitude: json['latitude']?.toDouble(),
+      longitude: json['longitude']?.toDouble(),
+      address: json['address'],
+      quickReplyType: json['quick_reply_type'] != null 
+        ? QuickReplyType.values.firstWhere(
+            (e) => e.toString().split('.').last == json['quick_reply_type'],
+            orElse: () => QuickReplyType.arrived,
+          )
+        : null,
+      imageUrl: json['image_url'],
+      isRead: json['is_read'] ?? false,
     );
   }
 }
@@ -538,4 +714,18 @@ enum MessageType {
   text,
   system,
   image,
+  location,
+  quickReply,
+  countdown,
+  status,
 }
+
+enum QuickReplyType {
+  arrived,
+  late5min,
+  late10min,
+  late15min,
+  cancel,
+  onWay,
+}
+
