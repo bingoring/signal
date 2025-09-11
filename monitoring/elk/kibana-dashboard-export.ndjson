@@ -1,0 +1,218 @@
+{"version":"8.0.0","objects":[
+  {
+    "id":"signal-logs-overview",
+    "type":"dashboard",
+    "attributes":{
+      "title":"Signal Logs Overview",
+      "description":"Main dashboard for Signal application logs analysis",
+      "version":1,
+      "timeRestore":false,
+      "kibanaSavedObjectMeta":{
+        "searchSourceJSON":"{\"query\":{\"match_all\":{}},\"filter\":[]}"
+      },
+      "panelsJSON":"[{\"version\":\"8.0.0\",\"gridData\":{\"x\":0,\"y\":0,\"w\":24,\"h\":15,\"i\":\"1\"},\"panelIndex\":\"1\",\"embeddableConfig\":{},\"panelRefName\":\"panel_1\"},{\"version\":\"8.0.0\",\"gridData\":{\"x\":24,\"y\":0,\"w\":24,\"h\":15,\"i\":\"2\"},\"panelIndex\":\"2\",\"embeddableConfig\":{},\"panelRefName\":\"panel_2\"},{\"version\":\"8.0.0\",\"gridData\":{\"x\":0,\"y\":15,\"w\":48,\"h\":15,\"i\":\"3\"},\"panelIndex\":\"3\",\"embeddableConfig\":{},\"panelRefName\":\"panel_3\"},{\"version\":\"8.0.0\",\"gridData\":{\"x\":0,\"y\":30,\"w\":24,\"h\":15,\"i\":\"4\"},\"panelIndex\":\"4\",\"embeddableConfig\":{},\"panelRefName\":\"panel_4\"},{\"version\":\"8.0.0\",\"gridData\":{\"x\":24,\"y\":30,\"w\":24,\"h\":15,\"i\":\"5\"},\"panelIndex\":\"5\",\"embeddableConfig\":{},\"panelRefName\":\"panel_5\"}]"
+    },
+    "references":[
+      {"name":"panel_1","type":"visualization","id":"log-levels-pie"},
+      {"name":"panel_2","type":"visualization","id":"services-breakdown"},
+      {"name":"panel_3","type":"visualization","id":"log-timeline"},
+      {"name":"panel_4","type":"visualization","id":"error-analysis"},
+      {"name":"panel_5","type":"visualization","id":"performance-metrics"}
+    ]
+  },
+  {
+    "id":"log-levels-pie",
+    "type":"visualization",
+    "attributes":{
+      "title":"Log Levels Distribution",
+      "visState":"{\"title\":\"Log Levels Distribution\",\"type\":\"pie\",\"aggs\":[{\"id\":\"1\",\"type\":\"count\",\"schema\":\"metric\",\"params\":{}},{\"id\":\"2\",\"type\":\"terms\",\"schema\":\"segment\",\"params\":{\"field\":\"log_level\",\"size\":10,\"order\":\"desc\",\"orderBy\":\"1\"}}]}",
+      "uiStateJSON":"{}",
+      "description":"Distribution of log levels across all services",
+      "kibanaSavedObjectMeta":{
+        "searchSourceJSON":"{\"index\":\"signal-logs-*\",\"query\":{\"match_all\":{}},\"filter\":[]}"
+      }
+    }
+  },
+  {
+    "id":"services-breakdown",
+    "type":"visualization",
+    "attributes":{
+      "title":"Services Log Volume",
+      "visState":"{\"title\":\"Services Log Volume\",\"type\":\"horizontal_bar\",\"aggs\":[{\"id\":\"1\",\"type\":\"count\",\"schema\":\"metric\",\"params\":{}},{\"id\":\"2\",\"type\":\"terms\",\"schema\":\"segment\",\"params\":{\"field\":\"service\",\"size\":20,\"order\":\"desc\",\"orderBy\":\"1\"}}]}",
+      "uiStateJSON":"{}",
+      "description":"Log volume breakdown by service",
+      "kibanaSavedObjectMeta":{
+        "searchSourceJSON":"{\"index\":\"signal-logs-*\",\"query\":{\"match_all\":{}},\"filter\":[]}"
+      }
+    }
+  },
+  {
+    "id":"log-timeline",
+    "type":"visualization",
+    "attributes":{
+      "title":"Log Timeline",
+      "visState":"{\"title\":\"Log Timeline\",\"type\":\"line\",\"aggs\":[{\"id\":\"1\",\"type\":\"count\",\"schema\":\"metric\",\"params\":{}},{\"id\":\"2\",\"type\":\"date_histogram\",\"schema\":\"segment\",\"params\":{\"field\":\"@timestamp\",\"interval\":\"auto\",\"min_doc_count\":1}},{\"id\":\"3\",\"type\":\"terms\",\"schema\":\"group\",\"params\":{\"field\":\"log_level\",\"size\":5,\"order\":\"desc\",\"orderBy\":\"1\"}}]}",
+      "uiStateJSON":"{}",
+      "description":"Timeline of logs by level over time",
+      "kibanaSavedObjectMeta":{
+        "searchSourceJSON":"{\"index\":\"signal-logs-*\",\"query\":{\"match_all\":{}},\"filter\":[]}"
+      }
+    }
+  },
+  {
+    "id":"error-analysis",
+    "type":"visualization",
+    "attributes":{
+      "title":"Error Analysis",
+      "visState":"{\"title\":\"Error Analysis\",\"type\":\"table\",\"aggs\":[{\"id\":\"1\",\"type\":\"count\",\"schema\":\"metric\",\"params\":{}},{\"id\":\"2\",\"type\":\"terms\",\"schema\":\"bucket\",\"params\":{\"field\":\"service\",\"size\":10,\"order\":\"desc\",\"orderBy\":\"1\"}},{\"id\":\"3\",\"type\":\"terms\",\"schema\":\"bucket\",\"params\":{\"field\":\"message.keyword\",\"size\":5,\"order\":\"desc\",\"orderBy\":\"1\"}}]}",
+      "uiStateJSON":"{}",
+      "description":"Analysis of error messages by service",
+      "kibanaSavedObjectMeta":{
+        "searchSourceJSON":"{\"index\":\"signal-logs-*\",\"query\":{\"bool\":{\"must\":[{\"match\":{\"log_level\":\"ERROR\"}}]}},\"filter\":[]}"
+      }
+    }
+  },
+  {
+    "id":"performance-metrics",
+    "type":"visualization",
+    "attributes":{
+      "title":"Response Time Metrics",
+      "visState":"{\"title\":\"Response Time Metrics\",\"type\":\"histogram\",\"aggs\":[{\"id\":\"1\",\"type\":\"count\",\"schema\":\"metric\",\"params\":{}},{\"id\":\"2\",\"type\":\"histogram\",\"schema\":\"segment\",\"params\":{\"field\":\"response_time\",\"interval\":100,\"extended_bounds\":{\"min\":0,\"max\":2000}}}]}",
+      "uiStateJSON":"{}",
+      "description":"Distribution of response times",
+      "kibanaSavedObjectMeta":{
+        "searchSourceJSON":"{\"index\":\"signal-logs-*\",\"query\":{\"exists\":{\"field\":\"response_time\"}},\"filter\":[]}"
+      }
+    }
+  },
+  {
+    "id":"security-dashboard",
+    "type":"dashboard",
+    "attributes":{
+      "title":"Security Events Dashboard",
+      "description":"Dashboard for monitoring security-related events",
+      "version":1,
+      "timeRestore":false,
+      "kibanaSavedObjectMeta":{
+        "searchSourceJSON":"{\"query\":{\"bool\":{\"must\":[{\"terms\":{\"tags\":[\"security\",\"error\",\"auth_failure\"]}}]}},\"filter\":[]}"
+      },
+      "panelsJSON":"[{\"version\":\"8.0.0\",\"gridData\":{\"x\":0,\"y\":0,\"w\":24,\"h\":15,\"i\":\"1\"},\"panelIndex\":\"1\",\"embeddableConfig\":{},\"panelRefName\":\"panel_1\"},{\"version\":\"8.0.0\",\"gridData\":{\"x\":24,\"y\":0,\"w\":24,\"h\":15,\"i\":\"2\"},\"panelIndex\":\"2\",\"embeddableConfig\":{},\"panelRefName\":\"panel_2\"},{\"version\":\"8.0.0\",\"gridData\":{\"x\":0,\"y\":15,\"w\":48,\"h\":15,\"i\":\"3\"},\"panelIndex\":\"3\",\"embeddableConfig\":{},\"panelRefName\":\"panel_3\"}]"
+    },
+    "references":[
+      {"name":"panel_1","type":"visualization","id":"auth-failures"},
+      {"name":"panel_2","type":"visualization","id":"security-events-geo"},
+      {"name":"panel_3","type":"visualization","id":"security-timeline"}
+    ]
+  },
+  {
+    "id":"auth-failures",
+    "type":"visualization",
+    "attributes":{
+      "title":"Authentication Failures",
+      "visState":"{\"title\":\"Authentication Failures\",\"type\":\"line\",\"aggs\":[{\"id\":\"1\",\"type\":\"count\",\"schema\":\"metric\",\"params\":{}},{\"id\":\"2\",\"type\":\"date_histogram\",\"schema\":\"segment\",\"params\":{\"field\":\"@timestamp\",\"interval\":\"auto\",\"min_doc_count\":1}},{\"id\":\"3\",\"type\":\"terms\",\"schema\":\"group\",\"params\":{\"field\":\"client_ip\",\"size\":10,\"order\":\"desc\",\"orderBy\":\"1\"}}]}",
+      "uiStateJSON":"{}",
+      "description":"Authentication failure attempts over time by IP",
+      "kibanaSavedObjectMeta":{
+        "searchSourceJSON":"{\"index\":\"signal-security-*\",\"query\":{\"bool\":{\"must\":[{\"match\":{\"tags\":\"auth_failure\"}}]}},\"filter\":[]}"
+      }
+    }
+  },
+  {
+    "id":"security-events-geo",
+    "type":"visualization",
+    "attributes":{
+      "title":"Security Events Geographic Distribution",
+      "visState":"{\"title\":\"Security Events Geographic Distribution\",\"type\":\"tile_map\",\"aggs\":[{\"id\":\"1\",\"type\":\"count\",\"schema\":\"metric\",\"params\":{}},{\"id\":\"2\",\"type\":\"geohash_grid\",\"schema\":\"segment\",\"params\":{\"field\":\"geoip.location\",\"autoPrecision\":true,\"precision\":2}}]}",
+      "uiStateJSON":"{}",
+      "description":"Geographic distribution of security events",
+      "kibanaSavedObjectMeta":{
+        "searchSourceJSON":"{\"index\":\"signal-security-*\",\"query\":{\"bool\":{\"must\":[{\"exists\":{\"field\":\"geoip.location\"}}]}},\"filter\":[]}"
+      }
+    }
+  },
+  {
+    "id":"security-timeline",
+    "type":"visualization",
+    "attributes":{
+      "title":"Security Events Timeline",
+      "visState":"{\"title\":\"Security Events Timeline\",\"type\":\"line\",\"aggs\":[{\"id\":\"1\",\"type\":\"count\",\"schema\":\"metric\",\"params\":{}},{\"id\":\"2\",\"type\":\"date_histogram\",\"schema\":\"segment\",\"params\":{\"field\":\"@timestamp\",\"interval\":\"auto\",\"min_doc_count\":1}},{\"id\":\"3\",\"type\":\"terms\",\"schema\":\"group\",\"params\":{\"field\":\"tags\",\"size\":5,\"order\":\"desc\",\"orderBy\":\"1\"}}]}",
+      "uiStateJSON":"{}",
+      "description":"Timeline of different security event types",
+      "kibanaSavedObjectMeta":{
+        "searchSourceJSON":"{\"index\":\"signal-security-*\",\"query\":{\"bool\":{\"must\":[{\"terms\":{\"tags\":[\"security\",\"auth_failure\",\"rate_limit\",\"attack\"]}}]}},\"filter\":[]}"
+      }
+    }
+  },
+  {
+    "id":"business-metrics-dashboard",
+    "type":"dashboard",
+    "attributes":{
+      "title":"Business Metrics Dashboard",
+      "description":"Dashboard for monitoring business KPIs and user engagement",
+      "version":1,
+      "timeRestore":false,
+      "kibanaSavedObjectMeta":{
+        "searchSourceJSON":"{\"query\":{\"bool\":{\"must\":[{\"match\":{\"tags\":\"business\"}}]}},\"filter\":[]}"
+      },
+      "panelsJSON":"[{\"version\":\"8.0.0\",\"gridData\":{\"x\":0,\"y\":0,\"w\":16,\"h\":15,\"i\":\"1\"},\"panelIndex\":\"1\",\"embeddableConfig\":{},\"panelRefName\":\"panel_1\"},{\"version\":\"8.0.0\",\"gridData\":{\"x\":16,\"y\":0,\"w\":16,\"h\":15,\"i\":\"2\"},\"panelIndex\":\"2\",\"embeddableConfig\":{},\"panelRefName\":\"panel_2\"},{\"version\":\"8.0.0\",\"gridData\":{\"x\":32,\"y\":0,\"w\":16,\"h\":15,\"i\":\"3\"},\"panelIndex\":\"3\",\"embeddableConfig\":{},\"panelRefName\":\"panel_3\"},{\"version\":\"8.0.0\",\"gridData\":{\"x\":0,\"y\":15,\"w\":48,\"h\":15,\"i\":\"4\"},\"panelIndex\":\"4\",\"embeddableConfig\":{},\"panelRefName\":\"panel_4\"}]"
+    },
+    "references":[
+      {"name":"panel_1","type":"visualization","id":"signal-creation-rate"},
+      {"name":"panel_2","type":"visualization","id":"user-engagement"},
+      {"name":"panel_3","type":"visualization","id":"chat-activity"},
+      {"name":"panel_4","type":"visualization","id":"business-timeline"}
+    ]
+  },
+  {
+    "id":"signal-creation-rate",
+    "type":"visualization",
+    "attributes":{
+      "title":"Signal Creation Rate",
+      "visState":"{\"title\":\"Signal Creation Rate\",\"type\":\"metric\",\"aggs\":[{\"id\":\"1\",\"type\":\"count\",\"schema\":\"metric\",\"params\":{}},{\"id\":\"2\",\"type\":\"date_histogram\",\"schema\":\"group\",\"params\":{\"field\":\"@timestamp\",\"interval\":\"1h\",\"min_doc_count\":1}}]}",
+      "uiStateJSON":"{}",
+      "description":"Rate of signal creation over time",
+      "kibanaSavedObjectMeta":{
+        "searchSourceJSON":"{\"index\":\"signal-business-*\",\"query\":{\"bool\":{\"must\":[{\"match\":{\"tags\":\"signal_creation\"}}]}},\"filter\":[]}"
+      }
+    }
+  },
+  {
+    "id":"user-engagement",
+    "type":"visualization",
+    "attributes":{
+      "title":"User Engagement Metrics",
+      "visState":"{\"title\":\"User Engagement Metrics\",\"type\":\"pie\",\"aggs\":[{\"id\":\"1\",\"type\":\"count\",\"schema\":\"metric\",\"params\":{}},{\"id\":\"2\",\"type\":\"terms\",\"schema\":\"segment\",\"params\":{\"field\":\"tags\",\"size\":10,\"order\":\"desc\",\"orderBy\":\"1\"}}]}",
+      "uiStateJSON":"{}",
+      "description":"Breakdown of user engagement activities",
+      "kibanaSavedObjectMeta":{
+        "searchSourceJSON":"{\"index\":\"signal-business-*\",\"query\":{\"bool\":{\"must\":[{\"terms\":{\"tags\":[\"signal_creation\",\"signal_join\",\"chat_activity\"]}}]}},\"filter\":[]}"
+      }
+    }
+  },
+  {
+    "id":"chat-activity",
+    "type":"visualization",
+    "attributes":{
+      "title":"Chat Activity Volume",
+      "visState":"{\"title\":\"Chat Activity Volume\",\"type\":\"histogram\",\"aggs\":[{\"id\":\"1\",\"type\":\"count\",\"schema\":\"metric\",\"params\":{}},{\"id\":\"2\",\"type\":\"date_histogram\",\"schema\":\"segment\",\"params\":{\"field\":\"@timestamp\",\"interval\":\"1h\",\"min_doc_count\":0}}]}",
+      "uiStateJSON":"{}",
+      "description":"Volume of chat messages over time",
+      "kibanaSavedObjectMeta":{
+        "searchSourceJSON":"{\"index\":\"signal-business-*\",\"query\":{\"bool\":{\"must\":[{\"match\":{\"tags\":\"chat_activity\"}}]}},\"filter\":[]}"
+      }
+    }
+  },
+  {
+    "id":"business-timeline",
+    "type":"visualization",
+    "attributes":{
+      "title":"Business Events Timeline",
+      "visState":"{\"title\":\"Business Events Timeline\",\"type\":\"line\",\"aggs\":[{\"id\":\"1\",\"type\":\"count\",\"schema\":\"metric\",\"params\":{}},{\"id\":\"2\",\"type\":\"date_histogram\",\"schema\":\"segment\",\"params\":{\"field\":\"@timestamp\",\"interval\":\"auto\",\"min_doc_count\":1}},{\"id\":\"3\",\"type\":\"terms\",\"schema\":\"group\",\"params\":{\"field\":\"tags\",\"size\":5,\"order\":\"desc\",\"orderBy\":\"1\"}}]}",
+      "uiStateJSON":"{}",
+      "description":"Timeline of all business events",
+      "kibanaSavedObjectMeta":{
+        "searchSourceJSON":"{\"index\":\"signal-business-*\",\"query\":{\"match_all\":{}},\"filter\":[]}"
+      }
+    }
+  }
+]}

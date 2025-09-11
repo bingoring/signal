@@ -1,0 +1,319 @@
+# Prometheus Alert Rules for Signal Application
+
+groups:
+  # Application Performance Alerts
+  - name: signal.performance
+    rules:
+      - alert: HighResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          service: signal-backend
+        annotations:
+          summary: "High HTTP response time detected"
+          description: "95th percentile HTTP response time is {{ $value | humanizeDuration }} for service {{ $labels.service }}"
+          runbook_url: "https://docs.signal.com/runbooks/high-response-time"
+
+      - alert: CriticalResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 1.0
+        for: 2m
+        labels:
+          severity: critical
+          service: signal-backend
+        annotations:
+          summary: "Critical HTTP response time detected"
+          description: "95th percentile HTTP response time is {{ $value | humanizeDuration }} for service {{ $labels.service }}"
+          runbook_url: "https://docs.signal.com/runbooks/critical-response-time"
+
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.01
+        for: 2m
+        labels:
+          severity: warning
+          service: signal-backend
+        annotations:
+          summary: "High HTTP error rate detected"
+          description: "Error rate is {{ $value | humanizePercentage }} for service {{ $labels.service }}"
+
+      - alert: CriticalErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+        for: 1m
+        labels:
+          severity: critical
+          service: signal-backend
+        annotations:
+          summary: "Critical HTTP error rate detected"
+          description: "Error rate is {{ $value | humanizePercentage }} for service {{ $labels.service }}"
+
+  # WebSocket Alerts
+  - name: signal.websocket
+    rules:
+      - alert: WebSocketConnectionsDropping
+        expr: rate(websocket_connections_total[5m]) < -10
+        for: 3m
+        labels:
+          severity: warning
+          service: signal-websocket
+        annotations:
+          summary: "WebSocket connections dropping rapidly"
+          description: "WebSocket connections are dropping at {{ $value }} connections per second"
+
+      - alert: WebSocketHighLatency
+        expr: histogram_quantile(0.95, rate(websocket_message_duration_seconds_bucket[5m])) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          service: signal-websocket
+        annotations:
+          summary: "High WebSocket message latency"
+          description: "95th percentile WebSocket message latency is {{ $value | humanizeDuration }}"
+
+      - alert: TooManyWebSocketConnections
+        expr: websocket_connections_active > 5000
+        for: 2m
+        labels:
+          severity: warning
+          service: signal-websocket
+        annotations:
+          summary: "Too many active WebSocket connections"
+          description: "{{ $value }} active WebSocket connections detected"
+
+  # Database Alerts
+  - name: signal.database
+    rules:
+      - alert: DatabaseConnectionPoolHigh
+        expr: pg_stat_activity_count / pg_settings_max_connections > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          service: postgres
+        annotations:
+          summary: "Database connection pool utilization high"
+          description: "Database connection pool is {{ $value | humanizePercentage }} full"
+
+      - alert: DatabaseConnectionPoolCritical
+        expr: pg_stat_activity_count / pg_settings_max_connections > 0.95
+        for: 2m
+        labels:
+          severity: critical
+          service: postgres
+        annotations:
+          summary: "Database connection pool critically high"
+          description: "Database connection pool is {{ $value | humanizePercentage }} full"
+
+      - alert: DatabaseSlowQueries
+        expr: rate(pg_stat_statements_mean_time_seconds[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+          service: postgres
+        annotations:
+          summary: "Database slow queries detected"
+          description: "Average query execution time is {{ $value | humanizeDuration }}"
+
+      - alert: DatabaseReplicationLag
+        expr: pg_stat_replication_lag_seconds > 60
+        for: 5m
+        labels:
+          severity: warning
+          service: postgres
+        annotations:
+          summary: "Database replication lag high"
+          description: "Database replication lag is {{ $value | humanizeDuration }}"
+
+  # Redis Alerts
+  - name: signal.redis
+    rules:
+      - alert: RedisMemoryUsageHigh
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+        annotations:
+          summary: "Redis memory usage high"
+          description: "Redis memory usage is {{ $value | humanizePercentage }}"
+
+      - alert: RedisConnectionsHigh
+        expr: redis_connected_clients / redis_config_maxclients > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+        annotations:
+          summary: "Redis connections high"
+          description: "Redis has {{ $value }} connected clients"
+
+      - alert: RedisKeyspaceHitRateLow
+        expr: redis_keyspace_hits_total / (redis_keyspace_hits_total + redis_keyspace_misses_total) < 0.8
+        for: 10m
+        labels:
+          severity: warning
+          service: redis
+        annotations:
+          summary: "Redis keyspace hit rate low"
+          description: "Redis keyspace hit rate is {{ $value | humanizePercentage }}"
+
+  # System Resource Alerts
+  - name: signal.system
+    rules:
+      - alert: HighCPUUsage
+        expr: 100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage detected"
+          description: "CPU usage is {{ $value | humanizePercentage }} on instance {{ $labels.instance }}"
+
+      - alert: CriticalCPUUsage
+        expr: 100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 95
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical CPU usage detected"
+          description: "CPU usage is {{ $value | humanizePercentage }} on instance {{ $labels.instance }}"
+
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is {{ $value | humanizePercentage }} on instance {{ $labels.instance }}"
+
+      - alert: CriticalMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes > 0.95
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical memory usage detected"
+          description: "Memory usage is {{ $value | humanizePercentage }} on instance {{ $labels.instance }}"
+
+      - alert: DiskSpaceUsageHigh
+        expr: (node_filesystem_size_bytes - node_filesystem_avail_bytes) / node_filesystem_size_bytes > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High disk space usage"
+          description: "Disk usage is {{ $value | humanizePercentage }} on {{ $labels.mountpoint }} at {{ $labels.instance }}"
+
+      - alert: DiskSpaceUsageCritical
+        expr: (node_filesystem_size_bytes - node_filesystem_avail_bytes) / node_filesystem_size_bytes > 0.95
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical disk space usage"
+          description: "Disk usage is {{ $value | humanizePercentage }} on {{ $labels.mountpoint }} at {{ $labels.instance }}"
+
+  # Application-Specific Alerts
+  - name: signal.application
+    rules:
+      - alert: HighSignalCreationRate
+        expr: rate(signal_created_total[5m]) > 100
+        for: 5m
+        labels:
+          severity: info
+          service: signal-backend
+        annotations:
+          summary: "High signal creation rate"
+          description: "Signals are being created at {{ $value }} per second"
+
+      - alert: ChatRoomCreationFailure
+        expr: rate(chat_room_creation_failures_total[5m]) > 1
+        for: 2m
+        labels:
+          severity: warning
+          service: signal-backend
+        annotations:
+          summary: "Chat room creation failures detected"
+          description: "Chat room creation is failing at {{ $value }} failures per second"
+
+      - alert: UserAuthenticationFailureSpike
+        expr: rate(auth_failures_total[5m]) > 10
+        for: 3m
+        labels:
+          severity: warning
+          service: signal-backend
+        annotations:
+          summary: "High authentication failure rate"
+          description: "Authentication failures at {{ $value }} per second - possible attack"
+
+      - alert: GeoLocationServiceDown
+        expr: up{job="geolocation-service"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: geolocation
+        annotations:
+          summary: "Geolocation service is down"
+          description: "Geolocation service has been down for more than 1 minute"
+
+  # Service Health Alerts
+  - name: signal.service_health
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "Service {{ $labels.job }} on {{ $labels.instance }} has been down for more than 1 minute"
+
+      - alert: ServiceFlapping
+        expr: changes(up[10m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Service {{ $labels.job }} is flapping"
+          description: "Service {{ $labels.job }} on {{ $labels.instance }} has changed state {{ $value }} times in 10 minutes"
+
+      - alert: HealthCheckFailure
+        expr: probe_success == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Health check failure for {{ $labels.instance }}"
+          description: "Health check for {{ $labels.instance }} has been failing for 2 minutes"
+
+  # Business Metrics Alerts
+  - name: signal.business
+    rules:
+      - alert: LowUserEngagement
+        expr: rate(signal_joins_total[1h]) / rate(signal_created_total[1h]) < 0.5
+        for: 30m
+        labels:
+          severity: info
+          team: product
+        annotations:
+          summary: "Low user engagement detected"
+          description: "Signal join rate is only {{ $value | humanizePercentage }} of creation rate"
+
+      - alert: HighMeetingCancellationRate
+        expr: rate(meetings_cancelled_total[1h]) / rate(meetings_created_total[1h]) > 0.3
+        for: 30m
+        labels:
+          severity: warning
+          team: product
+        annotations:
+          summary: "High meeting cancellation rate"
+          description: "Meeting cancellation rate is {{ $value | humanizePercentage }}"
+
+      - alert: ChatMessageVolumeDropped
+        expr: rate(chat_messages_sent_total[1h]) < 100
+        for: 30m
+        labels:
+          severity: info
+          team: product
+        annotations:
+          summary: "Chat message volume has dropped"
+          description: "Chat messages per hour: {{ $value }}"

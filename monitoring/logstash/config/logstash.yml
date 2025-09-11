@@ -1,0 +1,39 @@
+# Logstash configuration for Signal application logs
+
+node.name: signal-logstash
+path.data: /usr/share/logstash/data
+path.config: /usr/share/logstash/config
+path.logs: /usr/share/logstash/logs
+
+pipeline.workers: 4
+pipeline.batch.size: 1000
+pipeline.batch.delay: 50
+
+# Pipeline configuration
+pipeline.ordered: auto
+
+# Monitoring
+monitoring.enabled: true
+monitoring.elasticsearch.hosts: ["http://elasticsearch:9200"]
+
+# X-Pack monitoring
+xpack.monitoring.enabled: true
+xpack.monitoring.elasticsearch.hosts: ["http://elasticsearch:9200"]
+
+# HTTP API settings
+http.host: "0.0.0.0"
+http.port: 9600
+
+# Log level
+log.level: info
+
+# Queue settings
+queue.type: persisted
+queue.max_events: 0
+queue.max_bytes: 1gb
+queue.page_capacity: 64mb
+queue.drain: false
+
+# Dead letter queue
+dead_letter_queue.enable: true
+dead_letter_queue.max_bytes: 1gb
