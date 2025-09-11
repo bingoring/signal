@@ -1,0 +1,387 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run integration tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+env:
+  GO_VERSION: '1.21'
+  FLUTTER_VERSION: '3.16.0'
+
+jobs:
+  # Unit Tests (runs first for fast feedback)
+  unit-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [backend, websocket, module]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+    
+    - name: Run Unit Tests - Backend
+      if: matrix.component == 'backend'
+      run: |
+        cd be
+        go mod tidy
+        go test -v ./... -race -coverprofile=coverage.out
+        go tool cover -html=coverage.out -o coverage.html
+    
+    - name: Run Unit Tests - WebSocket
+      if: matrix.component == 'websocket'
+      run: |
+        cd be
+        go test -v ./internal/services/websocket_service_test.go -race
+    
+    - name: Run Unit Tests - Module
+      if: matrix.component == 'module'
+      run: |
+        cd module
+        go mod tidy
+        go test -v ./... -race -coverprofile=coverage.out
+    
+    - name: Upload Coverage Reports
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./${{ matrix.component }}/coverage.out
+        flags: ${{ matrix.component }}
+        name: ${{ matrix.component }}-coverage
+
+  # Frontend Tests
+  frontend-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform: [ios, android]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: ${{ env.FLUTTER_VERSION }}
+        cache: true
+    
+    - name: Run iOS Tests
+      if: matrix.platform == 'ios'
+      run: |
+        cd ios
+        flutter pub get
+        flutter analyze
+        flutter test --coverage
+        genhtml coverage/lcov.info -o coverage/html
+    
+    - name: Set up JDK for Android
+      if: matrix.platform == 'android'
+      uses: actions/setup-java@v3
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+    
+    - name: Run Android Tests
+      if: matrix.platform == 'android'
+      run: |
+        cd android
+        ./gradlew test --stacktrace
+        ./gradlew lint
+        ./gradlew jacocoTestReport
+    
+    - name: Upload Test Results
+      uses: actions/upload-artifact@v3
+      with:
+        name: ${{ matrix.platform }}-test-results
+        path: |
+          ${{ matrix.platform }}/coverage/
+          ${{ matrix.platform }}/build/reports/
+
+  # Security Scans
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Shallow clones should be disabled for better analysis
+    
+    - name: Run Trivy vulnerability scanner (Filesystem)
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+    
+    - name: Upload Trivy scan results
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+    
+    - name: Run Gosec Security Scanner
+      uses: securecodewarrior/github-action-gosec@master
+      with:
+        args: '-fmt sarif -out gosec-results.sarif ./...'
+        workdir: 'be'
+    
+    - name: Upload Gosec scan results
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'be/gosec-results.sarif'
+
+  # Build Docker Images
+  build:
+    needs: [unit-tests, frontend-tests, security-scan]
+    runs-on: ubuntu-latest
+    outputs:
+      backend-image: ${{ steps.backend.outputs.image }}
+      websocket-image: ${{ steps.websocket.outputs.image }}
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Build Backend Image
+      id: backend
+      run: |
+        IMAGE_TAG=test-${GITHUB_SHA::7}
+        docker build -t signal/backend:$IMAGE_TAG -f be/Dockerfile be/
+        echo "image=signal/backend:$IMAGE_TAG" >> $GITHUB_OUTPUT
+    
+    - name: Build WebSocket Image
+      id: websocket
+      run: |
+        IMAGE_TAG=test-${GITHUB_SHA::7}
+        docker build -t signal/websocket:$IMAGE_TAG -f be/Dockerfile.websocket be/
+        echo "image=signal/websocket:$IMAGE_TAG" >> $GITHUB_OUTPUT
+    
+    - name: Test Docker Images
+      run: |
+        # Test backend image
+        docker run --rm -d --name test-backend \
+          -e DATABASE_URL=postgres://test:test@localhost/test \
+          -e REDIS_URL=redis://localhost:6379 \
+          ${{ steps.backend.outputs.image }}
+        
+        sleep 5
+        docker logs test-backend
+        docker stop test-backend
+        
+        # Test websocket image
+        docker run --rm -d --name test-websocket \
+          -e REDIS_URL=redis://localhost:6379 \
+          ${{ steps.websocket.outputs.image }}
+        
+        sleep 5
+        docker logs test-websocket
+        docker stop test-websocket
+
+  # Integration Tests
+  integration-tests:
+    needs: [build]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        test-suite: [complete-journey, cross-platform-sync, performance]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+    
+    - name: Install test dependencies
+      run: |
+        cd tests/integration
+        go mod init signal-integration-tests
+        go get github.com/stretchr/testify/suite
+        go get github.com/gorilla/websocket
+        go get github.com/go-redis/redis/v8
+        go get github.com/lib/pq
+        go get gopkg.in/yaml.v3
+    
+    - name: Start Test Environment
+      run: |
+        # Update docker-compose with built images
+        sed -i 's|signal/backend:latest|${{ needs.build.outputs.backend-image }}|g' docker-compose.test.yml
+        sed -i 's|signal/websocket:latest|${{ needs.build.outputs.websocket-image }}|g' docker-compose.test.yml
+        
+        # Start test services
+        docker-compose -f docker-compose.test.yml up -d
+        
+        # Wait for services to be ready
+        timeout 300 bash -c 'until docker-compose -f docker-compose.test.yml exec -T test-postgres pg_isready -U signal_test; do sleep 5; done'
+        timeout 300 bash -c 'until docker-compose -f docker-compose.test.yml exec -T test-redis redis-cli ping; do sleep 5; done'
+        timeout 300 bash -c 'until curl -f http://localhost:8081/health; do sleep 5; done'
+        timeout 300 bash -c 'until curl -f http://localhost:8082/ws/health; do sleep 5; done'
+    
+    - name: Run Integration Tests - Complete Journey
+      if: matrix.test-suite == 'complete-journey'
+      run: |
+        cd tests/integration
+        go test -v -run TestCompleteUserJourney -timeout 20m
+    
+    - name: Run Integration Tests - Cross Platform Sync
+      if: matrix.test-suite == 'cross-platform-sync'
+      run: |
+        cd tests/integration
+        go test -v -run TestCrossPlatformSync -timeout 15m
+    
+    - name: Run Performance Tests
+      if: matrix.test-suite == 'performance'
+      run: |
+        cd tests/performance
+        k6 run --vus 100 --duration 5m load-test.js
+    
+    - name: Collect Test Logs
+      if: always()
+      run: |
+        mkdir -p test-logs
+        docker-compose -f docker-compose.test.yml logs test-backend > test-logs/backend.log
+        docker-compose -f docker-compose.test.yml logs test-websocket > test-logs/websocket.log
+        docker-compose -f docker-compose.test.yml logs test-postgres > test-logs/postgres.log
+        docker-compose -f docker-compose.test.yml logs test-redis > test-logs/redis.log
+    
+    - name: Upload Test Logs
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: integration-test-logs-${{ matrix.test-suite }}
+        path: test-logs/
+    
+    - name: Cleanup Test Environment
+      if: always()
+      run: |
+        docker-compose -f docker-compose.test.yml down -v
+        docker system prune -f
+
+  # E2E Tests with Mobile Apps
+  e2e-tests:
+    needs: [build]
+    runs-on: macos-latest
+    if: github.event_name != 'schedule'  # Skip on scheduled runs to save resources
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: ${{ env.FLUTTER_VERSION }}
+        cache: true
+    
+    - name: Start Backend Services
+      run: |
+        # Start backend services for E2E testing
+        docker-compose -f docker-compose.test.yml up -d test-postgres test-redis test-backend test-websocket
+        
+        # Wait for services
+        timeout 300 bash -c 'until curl -f http://localhost:8081/health; do sleep 5; done'
+    
+    - name: Run iOS E2E Tests
+      run: |
+        cd ios
+        flutter pub get
+        flutter drive \
+          --driver=test_driver/integration_test.dart \
+          --target=integration_test/complete_journey_test.dart \
+          -d iPhone
+    
+    - name: Set up Android Emulator
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: 29
+        script: |
+          cd android
+          flutter drive \
+            --driver=test_driver/integration_test.dart \
+            --target=integration_test/complete_journey_test.dart
+    
+    - name: Cleanup E2E Environment
+      if: always()
+      run: |
+        docker-compose -f docker-compose.test.yml down
+
+  # Test Report Generation
+  test-report:
+    needs: [integration-tests, e2e-tests]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download all test artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: test-results/
+    
+    - name: Generate Test Report
+      run: |
+        pip install jinja2 pyyaml
+        python scripts/generate-test-report.py
+    
+    - name: Upload Test Report
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-report
+        path: test-report.html
+    
+    - name: Comment Test Results on PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const testReport = fs.readFileSync('test-report.html', 'utf8');
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `## Test Results\n\nIntegration tests completed. [View detailed report](${testReport})`
+          });
+
+  # Notify on Failure
+  notify-failure:
+    needs: [integration-tests, e2e-tests]
+    runs-on: ubuntu-latest
+    if: failure() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    
+    steps:
+    - name: Notify Slack on Failure
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        channel: '#signal-ci'
+        text: |
+          🚨 Integration tests failed on ${{ github.ref }}
+          
+          Commit: ${{ github.sha }}
+          Author: ${{ github.actor }}
+          
+          [View Details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
