@@ -1,0 +1,55 @@
+# Signal Integration Test Configuration
+
+test_environments:
+  local:
+    backend_url: "http://localhost:8081"
+    websocket_url: "ws://localhost:8082"
+    database_url: "postgres://signal_test:test_password@localhost:5433/signal_test?sslmode=disable"
+    redis_url: "redis://localhost:6380"
+    
+  docker:
+    backend_url: "http://test-backend:8080"
+    websocket_url: "ws://test-websocket:8081"
+    database_url: "postgres://signal_test:test_password@test-postgres:5432/signal_test?sslmode=disable"
+    redis_url: "redis://test-redis:6379"
+
+test_data:
+  users:
+    count: 10
+    location_range:
+      lat_min: 37.4900
+      lat_max: 37.5100
+      lng_min: 127.0200
+      lng_max: 127.0400
+      
+  signals:
+    count: 20
+    categories: ["맛집", "운동", "스터디", "여행", "취미"]
+    max_participants: [5, 10, 15, 20]
+    
+  chat_rooms:
+    count: 5
+    messages_per_room: 50
+
+performance_test:
+  load_profile:
+    concurrent_users: 100
+    ramp_up_time: "5m"
+    steady_state_time: "10m"
+    ramp_down_time: "2m"
+    
+  thresholds:
+    response_time_95p: 300  # ms
+    error_rate: 0.01        # 1%
+    websocket_connect_time: 1000  # ms
+
+monitoring:
+  metrics_interval: 15    # seconds
+  log_level: "debug"
+  enable_tracing: true
+
+timeouts:
+  api_request: 30         # seconds
+  websocket_connect: 10   # seconds
+  database_query: 5       # seconds
+  test_scenario: 900      # 15 minutes

@@ -1,0 +1,327 @@
+# Artillery Performance Test Configuration for Signal
+
+config:
+  target: 'http://localhost:8081'
+  phases:
+    # Warm-up phase
+    - duration: 60  # 1 minute
+      arrivalRate: 10
+      name: "Warm-up"
+    
+    # Load ramp-up
+    - duration: 300  # 5 minutes
+      arrivalRate: 1
+      rampTo: 50
+      name: "Ramp-up to normal load"
+    
+    # Sustained load
+    - duration: 600  # 10 minutes
+      arrivalRate: 50
+      name: "Sustained load"
+    
+    # Peak load
+    - duration: 180  # 3 minutes
+      arrivalRate: 50
+      rampTo: 150
+      name: "Peak load simulation"
+    
+    # Spike test
+    - duration: 60   # 1 minute
+      arrivalRate: 200
+      name: "Spike test"
+    
+    # Cool down
+    - duration: 300  # 5 minutes
+      arrivalRate: 150
+      rampTo: 10
+      name: "Cool down"
+
+  environments:
+    staging:
+      target: 'http://localhost:8081'
+      variables:
+        ws_target: 'ws://localhost:8082'
+    production:
+      target: 'https://api.signal.com'
+      variables:
+        ws_target: 'wss://ws.signal.com'
+
+  # Load test data
+  payload:
+    path: "./test-data.csv"
+    fields:
+      - "email"
+      - "name"
+      - "latitude"
+      - "longitude"
+
+  # Custom variables
+  variables:
+    test_signal_title: "Artillery Load Test Signal"
+    test_category: "테스트"
+    max_participants: 10
+
+  plugins:
+    # WebSocket plugin for real-time chat testing
+    websocket:
+      # Configure WebSocket testing
+    
+    # Metrics and monitoring
+    cloudwatch:
+      # Configure CloudWatch metrics (if using AWS)
+    
+    # Custom metrics
+    metrics-by-endpoint:
+      # Group metrics by API endpoint
+
+  # Performance expectations
+  expect:
+    statusCode: 200
+    contentType: json
+    maxErrorRate: 1  # Max 1% error rate
+    
+  # Monitoring thresholds
+  thresholds:
+    - metric: response_time_p99
+      threshold: 500
+      strict: false
+    - metric: response_time_p95
+      threshold: 300
+      strict: true
+    - metric: errors.rate
+      threshold: 0.01
+      strict: true
+
+# Test scenarios
+scenarios:
+  # Scenario 1: Complete user journey
+  - name: "Complete User Journey"
+    weight: 40
+    flow:
+      - post:
+          url: "/auth/register"
+          json:
+            email: "{{ $randomEmail() }}"
+            name: "{{ $randomFullName() }}"
+            latitude: "{{ $randomFloat(37.49, 37.51) }}"
+            longitude: "{{ $randomFloat(127.02, 127.04) }}"
+          capture:
+            - json: "$.token"
+              as: "auth_token"
+            - json: "$.user.id"
+              as: "user_id"
+          expect:
+            - statusCode: 200
+
+      - post:
+          url: "/signals"
+          headers:
+            Authorization: "Bearer {{ auth_token }}"
+          json:
+            title: "{{ test_signal_title }} {{ $timestamp() }}"
+            description: "Load test signal for performance testing"
+            category: "{{ test_category }}"
+            latitude: "{{ $randomFloat(37.49, 37.51) }}"
+            longitude: "{{ $randomFloat(127.02, 127.04) }}"
+            max_count: "{{ max_participants }}"
+            meet_time: "{{ $isoTimestamp($moment().add(2, 'hours')) }}"
+          capture:
+            - json: "$.id"
+              as: "signal_id"
+          expect:
+            - statusCode: 201
+
+      - get:
+          url: "/signals/search?lat=37.4981&lng=127.0276&radius=5000"
+          headers:
+            Authorization: "Bearer {{ auth_token }}"
+          expect:
+            - statusCode: 200
+
+      - post:
+          url: "/signals/{{ signal_id }}/join"
+          headers:
+            Authorization: "Bearer {{ auth_token }}"
+          expect:
+            - statusCode: [200, 409]  # 409 if already joined
+
+  # Scenario 2: API browsing behavior
+  - name: "API Browsing"
+    weight: 30
+    flow:
+      - post:
+          url: "/auth/register"
+          json:
+            email: "{{ $randomEmail() }}"
+            name: "{{ $randomFullName() }}"
+            latitude: "{{ $randomFloat(37.49, 37.51) }}"
+            longitude: "{{ $randomFloat(127.02, 127.04) }}"
+          capture:
+            - json: "$.token"
+              as: "auth_token"
+          expect:
+            - statusCode: 200
+
+      - loop:
+          count: 5
+          over:
+            - get:
+                url: "/signals/search?lat={{ $randomFloat(37.49, 37.51) }}&lng={{ $randomFloat(127.02, 127.04) }}&radius=1000"
+                headers:
+                  Authorization: "Bearer {{ auth_token }}"
+                expect:
+                  - statusCode: 200
+
+            - get:
+                url: "/users/profile"
+                headers:
+                  Authorization: "Bearer {{ auth_token }}"
+                expect:
+                  - statusCode: 200
+
+            - think: 2  # Pause between requests
+
+  # Scenario 3: WebSocket chat simulation
+  - name: "WebSocket Chat"
+    weight: 20
+    engine: ws
+    flow:
+      # First authenticate via HTTP
+      - post:
+          url: "/auth/register"
+          json:
+            email: "{{ $randomEmail() }}"
+            name: "{{ $randomFullName() }}"
+            latitude: 37.4981
+            longitude: 127.0276
+          capture:
+            - json: "$.token"
+              as: "auth_token"
+            - json: "$.user.id"
+              as: "user_id"
+          expect:
+            - statusCode: 200
+
+      # Create or join a signal
+      - post:
+          url: "/signals"
+          headers:
+            Authorization: "Bearer {{ auth_token }}"
+          json:
+            title: "Chat Test Signal {{ $timestamp() }}"
+            description: "WebSocket chat test signal"
+            category: "테스트"
+            latitude: 37.4981
+            longitude: 127.0276
+            max_count: 20
+            meet_time: "{{ $isoTimestamp($moment().add(1, 'hour')) }}"
+          capture:
+            - json: "$.id"
+              as: "signal_id"
+          expect:
+            - statusCode: 201
+
+      # Get or create chat room
+      - get:
+          url: "/chat/rooms?signal_id={{ signal_id }}"
+          headers:
+            Authorization: "Bearer {{ auth_token }}"
+          capture:
+            - json: "$.id"
+              as: "room_id"
+          expect:
+            - statusCode: [200, 404]
+
+      # WebSocket connection and messaging
+      - connect:
+          url: "{{ ws_target }}/ws/chat/{{ room_id }}?token={{ auth_token }}"
+          subprotocols: []
+          headers:
+            - Origin: "http://localhost:3000"
+          
+      - send:
+          payload: |
+            {
+              "type": "text",
+              "content": "Hello from Artillery load test!",
+              "timestamp": {{ $timestamp() }}
+            }
+
+      - think: 1
+
+      - send:
+          payload: |
+            {
+              "type": "quick_reply",
+              "content": "도착했어요",
+              "timestamp": {{ $timestamp() }}
+            }
+
+      - think: 2
+
+      - send:
+          payload: |
+            {
+              "type": "location",
+              "content": "현재 위치입니다",
+              "location": {
+                "latitude": 37.4981,
+                "longitude": 127.0276
+              },
+              "timestamp": {{ $timestamp() }}
+            }
+
+      - think: 1
+
+  # Scenario 4: Admin operations (lower frequency)
+  - name: "Admin Operations"
+    weight: 10
+    flow:
+      - get:
+          url: "/health"
+          expect:
+            - statusCode: 200
+
+      - get:
+          url: "/health/db"
+          expect:
+            - statusCode: 200
+
+      - get:
+          url: "/health/redis"
+          expect:
+            - statusCode: 200
+
+      - get:
+          url: "/metrics"
+          expect:
+            - statusCode: [200, 404]  # Metrics endpoint may not exist
+
+# Custom function definitions
+functions:
+  randomFloat:
+    min: 37.49
+    max: 37.51
+    
+  randomEmail:
+    format: "loadtest-{{ $timestamp() }}-{{ $randomString() }}@signal.com"
+    
+  randomFullName:
+    format: "Load Test User {{ $randomInt(1, 1000) }}"
+
+# Reporting configuration
+reporting:
+  # Console reporting
+  - type: console
+    config:
+      printErrorMessages: true
+
+  # JSON report for CI/CD
+  - type: json
+    config:
+      output: "./artillery-report.json"
+
+  # HTML report for human review
+  - type: html
+    config:
+      output: "./artillery-report.html"
