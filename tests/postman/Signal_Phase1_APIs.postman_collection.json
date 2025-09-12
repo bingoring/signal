@@ -1,0 +1,597 @@
+{
+	"info": {
+		"name": "Signal Phase 1 - Minimal Profile APIs",
+		"description": "Phase 1 최소주의 프로필 시스템 API 테스트 컬렉션",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"version": "1.0.0"
+	},
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{auth_token}}",
+				"type": "string"
+			}
+		]
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8080/api/v1",
+			"type": "string"
+		},
+		{
+			"key": "auth_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "test_user_id",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "Authentication",
+			"item": [
+				{
+					"name": "Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    pm.collectionVariables.set('auth_token', response.data.token);",
+									"    pm.test('Login successful', () => {",
+									"        pm.expect(response.success).to.be.true;",
+									"        pm.expect(response.data.token).to.be.a('string');",
+									"    });",
+									"} else {",
+									"    pm.test('Login failed', () => {",
+									"        pm.expect.fail('Login request failed');",
+									"    });",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"test@example.com\",\n    \"password\": \"password123\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/login",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "login"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Profile Management",
+			"item": [
+				{
+					"name": "Get My Profile",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Profile retrieved successfully', () => {",
+									"    pm.expect(pm.response.code).to.equal(200);",
+									"    const response = pm.response.json();",
+									"    pm.expect(response.success).to.be.true;",
+									"    pm.expect(response.data).to.have.property('manner_temperature');",
+									"    pm.expect(response.data).to.have.property('trust_level');",
+									"    pm.expect(response.data).to.have.property('completion_rate');",
+									"});",
+									"",
+									"pm.test('Manner temperature is valid', () => {",
+									"    const response = pm.response.json();",
+									"    const temp = response.data.manner_temperature;",
+									"    pm.expect(temp).to.be.at.least(20.0);",
+									"    pm.expect(temp).to.be.at.most(50.0);",
+									"});",
+									"",
+									"pm.test('Sensitive data not exposed', () => {",
+									"    const response = pm.response.json();",
+									"    pm.expect(response.data).to.not.have.property('password');",
+									"    pm.expect(response.data).to.not.have.property('email');",
+									"});"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/users/profile",
+							"host": ["{{base_url}}"],
+							"path": ["users", "profile"]
+						}
+					}
+				},
+				{
+					"name": "Quick Setup Profile",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Quick setup successful', () => {",
+									"    pm.expect(pm.response.code).to.equal(200);",
+									"    const response = pm.response.json();",
+									"    pm.expect(response.success).to.be.true;",
+									"    pm.expect(response.data.setup_completed).to.be.true;",
+									"});",
+									"",
+									"pm.test('Profile data updated correctly', () => {",
+									"    const response = pm.response.json();",
+									"    pm.expect(response.data.display_name).to.equal('빠른설정테스트');",
+									"    pm.expect(response.data.avatar).to.equal('😊');",
+									"    pm.expect(response.data.one_line).to.equal('Signal 테스트 중입니다');",
+									"    pm.expect(response.data.manner_temperature).to.equal(36.5);",
+									"});"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"display_name\": \"빠른설정테스트\",\n    \"avatar\": \"😊\",\n    \"one_line\": \"Signal 테스트 중입니다\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/users/quick-setup",
+							"host": ["{{base_url}}"],
+							"path": ["users", "quick-setup"]
+						}
+					}
+				},
+				{
+					"name": "Update Profile",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Profile updated successfully', () => {",
+									"    pm.expect(pm.response.code).to.equal(200);",
+									"    const response = pm.response.json();",
+									"    pm.expect(response.success).to.be.true;",
+									"});"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"display_name\": \"업데이트된닉네임\",\n    \"avatar\": \"🎾\",\n    \"one_line\": \"테니스를 좋아하는 사람\",\n    \"notifications_enabled\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/users/profile",
+							"host": ["{{base_url}}"],
+							"path": ["users", "profile"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Manner Temperature System",
+			"item": [
+				{
+					"name": "Update Manner Temperature - Signal Created",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Manner temperature updated for signal creation', () => {",
+									"    pm.expect(pm.response.code).to.equal(200);",
+									"    const response = pm.response.json();",
+									"    pm.expect(response.success).to.be.true;",
+									"    pm.expect(response.data.manner_temperature).to.be.above(36.5);",
+									"});",
+									"",
+									"pm.test('Activity stats updated', () => {",
+									"    const response = pm.response.json();",
+									"    pm.expect(response.data).to.have.property('total_activities');",
+									"    pm.expect(response.data).to.have.property('completion_rate');",
+									"    pm.expect(response.data).to.have.property('trust_level');",
+									"});"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"action\": \"signal_created\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/users/manner-temperature",
+							"host": ["{{base_url}}"],
+							"path": ["users", "manner-temperature"]
+						}
+					}
+				},
+				{
+					"name": "Update Manner Temperature - Signal Joined",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Manner temperature updated for signal join', () => {",
+									"    pm.expect(pm.response.code).to.equal(200);",
+									"    const response = pm.response.json();",
+									"    pm.expect(response.success).to.be.true;",
+									"});"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"action\": \"signal_joined\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/users/manner-temperature",
+							"host": ["{{base_url}}"],
+							"path": ["users", "manner-temperature"]
+						}
+					}
+				},
+				{
+					"name": "Update Manner Temperature - No Show",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Manner temperature updated for no show', () => {",
+									"    pm.expect(pm.response.code).to.equal(200);",
+									"    const response = pm.response.json();",
+									"    pm.expect(response.success).to.be.true;",
+									"    // 노쇼로 인한 매너온도 감소 확인",
+									"});"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"action\": \"no_show\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/users/manner-temperature",
+							"host": ["{{base_url}}"],
+							"path": ["users", "manner-temperature"]
+						}
+					}
+				},
+				{
+					"name": "Get Trust Stats",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Trust stats retrieved successfully', () => {",
+									"    pm.expect(pm.response.code).to.equal(200);",
+									"    const response = pm.response.json();",
+									"    pm.expect(response.success).to.be.true;",
+									"});",
+									"",
+									"pm.test('Trust stats contain all required fields', () => {",
+									"    const response = pm.response.json();",
+									"    const stats = response.data;",
+									"    pm.expect(stats).to.have.property('manner_temperature');",
+									"    pm.expect(stats).to.have.property('trust_level');",
+									"    pm.expect(stats).to.have.property('completion_rate');",
+									"    pm.expect(stats).to.have.property('signal_count');",
+									"    pm.expect(stats).to.have.property('join_count');",
+									"    pm.expect(stats).to.have.property('total_activities');",
+									"    pm.expect(stats).to.have.property('no_show_count');",
+									"    pm.expect(stats).to.have.property('is_recently_active');",
+									"});"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/users/trust-stats",
+							"host": ["{{base_url}}"],
+							"path": ["users", "trust-stats"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Public Profile Access",
+			"item": [
+				{
+					"name": "Get Minimal Profile by Username",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Minimal profile retrieved successfully', () => {",
+									"    pm.expect(pm.response.code).to.equal(200);",
+									"    const response = pm.response.json();",
+									"    pm.expect(response.success).to.be.true;",
+									"});",
+									"",
+									"pm.test('Only minimal data exposed', () => {",
+									"    const response = pm.response.json();",
+									"    const profile = response.data;",
+									"    ",
+									"    // 포함되어야 할 정보",
+									"    pm.expect(profile).to.have.property('username');",
+									"    pm.expect(profile).to.have.property('display_name');",
+									"    pm.expect(profile).to.have.property('manner_temperature');",
+									"    pm.expect(profile).to.have.property('trust_level');",
+									"    pm.expect(profile).to.have.property('total_activities');",
+									"    pm.expect(profile).to.have.property('completion_rate');",
+									"    ",
+									"    // 포함되지 않아야 할 민감한 정보",
+									"    pm.expect(profile).to.not.have.property('email');",
+									"    pm.expect(profile).to.not.have.property('no_show_count');",
+									"    pm.expect(profile).to.not.have.property('total_ratings');",
+									"});"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/users/testuser/minimal",
+							"host": ["{{base_url}}"],
+							"path": ["users", "testuser", "minimal"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Validation Tests",
+			"item": [
+				{
+					"name": "Quick Setup - Invalid Long DisplayName",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Long display name rejected', () => {",
+									"    pm.expect(pm.response.code).to.equal(400);",
+									"    const response = pm.response.json();",
+									"    pm.expect(response.success).to.be.false;",
+									"});"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"display_name\": \"이것은매우긴닉네임입니다아마도삼십자가넘을것같은데확인해보겠습니다정말로긴이름\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/users/quick-setup",
+							"host": ["{{base_url}}"],
+							"path": ["users", "quick-setup"]
+						}
+					}
+				},
+				{
+					"name": "Quick Setup - Invalid Long OneLine",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Long one line rejected', () => {",
+									"    pm.expect(pm.response.code).to.equal(400);",
+									"    const response = pm.response.json();",
+									"    pm.expect(response.success).to.be.false;",
+									"});"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"display_name\": \"올바른닉네임\",\n    \"one_line\": \"이것은매우긴한줄소개입니다정말로오십자를넘어갈것같은데확인해보겠습니다아마도거부될것입니다아마도말이죠\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/users/quick-setup",
+							"host": ["{{base_url}}"],
+							"path": ["users", "quick-setup"]
+						}
+					}
+				},
+				{
+					"name": "Update Manner Temperature - Invalid Action",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Invalid action rejected', () => {",
+									"    pm.expect(pm.response.code).to.equal(400);",
+									"    const response = pm.response.json();",
+									"    pm.expect(response.success).to.be.false;",
+									"});"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"action\": \"invalid_action\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/users/manner-temperature",
+							"host": ["{{base_url}}"],
+							"path": ["users", "manner-temperature"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Performance Tests",
+			"item": [
+				{
+					"name": "Profile Access Performance Test",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Response time is acceptable', () => {",
+									"    pm.expect(pm.response.responseTime).to.be.below(100);",
+									"});",
+									"",
+									"pm.test('Profile data complete', () => {",
+									"    const response = pm.response.json();",
+									"    pm.expect(response.data).to.have.property('manner_temperature');",
+									"    pm.expect(response.data).to.have.property('trust_level');",
+									"});"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/users/profile",
+							"host": ["{{base_url}}"],
+							"path": ["users", "profile"]
+						}
+					}
+				}
+			]
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// Global pre-request script",
+					"console.log('Running Signal Phase 1 API test: ' + pm.info.requestName);"
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// Global test script",
+					"pm.test('Response format is correct', () => {",
+					"    if (pm.response.code === 200) {",
+					"        const response = pm.response.json();",
+					"        pm.expect(response).to.have.property('success');",
+					"        pm.expect(response).to.have.property('message');",
+					"        if (response.success) {",
+					"            pm.expect(response).to.have.property('data');",
+					"        }",
+					"    }",
+					"});",
+					"",
+					"pm.test('Response time is reasonable', () => {",
+					"    pm.expect(pm.response.responseTime).to.be.below(1000);",
+					"});"
+				]
+			}
+		}
+	]
+}
