@@ -57,13 +57,15 @@ func main() {
 	signalRepo := repositories.NewSignalRepository(db.DB)
 	chatRepo := repositories.NewChatRepository(db.DB)
 	buddyRepo := repositories.NewBuddyRepository(db.DB)
+	avatarRepo := repositories.NewAvatarRepository(db.DB)
 
 	websocketService := services.NewWebSocketService(appLogger, redisClient)
 
 	userService := services.NewUserService(userRepo, jwtManager, appLogger)
-	signalService := services.NewSignalService(signalRepo, userRepo, redisClient, jobQueue, appLogger, websocketService)
 	chatService := services.NewChatService(chatRepo, signalRepo, redisClient, appLogger)
+	signalService := services.NewSignalService(signalRepo, userRepo, redisClient, jobQueue, appLogger, websocketService, chatService)
 	buddyService := services.NewBuddyService(buddyRepo, userRepo, appLogger)
+	avatarService := services.NewAvatarService(avatarRepo, userRepo, appLogger, db.DB)
 	stdLogger := log.New(os.Stdout, "[CHAT-WS] ", log.LstdFlags)
 	chatWebSocketService := services.NewChatWebSocketService(db.DB, stdLogger)
 
@@ -86,8 +88,9 @@ func main() {
 	signalHandler := handlers.NewSignalHandler(signalService, appLogger)
 	chatHandler := handlers.NewChatHandler(chatService, chatWebSocketService, appLogger)
 	buddyHandler := handlers.NewBuddyHandler(buddyService, appLogger)
+	avatarHandler := handlers.NewAvatarHandler(avatarService, authService)
 
-	router := setupRouter(cfg, userHandler, authHandler, oauthHandler, signalHandler, chatHandler, buddyHandler, websocketService, jwtManager, appLogger)
+	router := setupRouter(cfg, userHandler, authHandler, oauthHandler, signalHandler, chatHandler, buddyHandler, avatarHandler, websocketService, jwtManager, appLogger)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Server.Port,
@@ -127,6 +130,7 @@ func setupRouter(
 	signalHandler *handlers.SignalHandler,
 	chatHandler *handlers.ChatHandler,
 	buddyHandler *handlers.BuddyHandler,
+	avatarHandler *handlers.AvatarHandler,
 	websocketService *services.WebSocketService,
 	jwtManager *utils.JWTManager,
 	appLogger *logger.Logger,
@@ -247,6 +251,21 @@ func setupRouter(
 				buddies.POST("/invitations", buddyHandler.CreateBuddyInvitation)
 				buddies.GET("/invitations", buddyHandler.GetBuddyInvitations)
 				buddies.POST("/invitations/:invitationId/respond", buddyHandler.RespondBuddyInvitation)
+			}
+
+			// 아바타 관리
+			avatars := authenticated.Group("/avatars")
+			{
+				// 카테고리 및 아바타 목록
+				avatars.GET("/categories", avatarHandler.GetCategories)
+				avatars.GET("/selection", avatarHandler.GetAvatarsForSelection)
+				avatars.GET("/search", avatarHandler.SearchAvatars)
+				
+				// 사용자 아바타 관리
+				avatars.POST("/set", avatarHandler.SetUserAvatar)
+				avatars.POST("/favorite", avatarHandler.ToggleFavorite)
+				avatars.GET("/stats", avatarHandler.GetUserAvatarStats)
+				avatars.GET("/personality", avatarHandler.GetPersonalityAnalysis)
 			}
 		}
 	}

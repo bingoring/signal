@@ -15,6 +15,8 @@ type UserRepositoryInterface interface {
 	Update(user *models.User) error
 	UpdateLocation(userID uint, location *models.UserLocation) error
 	UpdateInterests(userID uint, interests []models.UserInterest) error
+	UpdateUserAvatar(tx *gorm.DB, userID uint, emoji string) error
+	GetUserProfile(userID uint) (*models.UserProfile, error)
 	AddPushToken(token *models.PushToken) error
 	GetPushTokens(userID uint) ([]models.PushToken, error)
 	GetUsersInRadius(latitude, longitude, radius float64, excludeUserID uint) ([]models.User, error)
@@ -211,9 +213,9 @@ func (r *UserRepository) RateUser(rating *models.UserRating) error {
 		}
 
 		// 새 평균 점수 계산
-		totalScore := float64(profile.TotalRatings)*profile.MannerScore + float64(rating.Score)
+		totalScore := float64(profile.TotalRatings)*profile.MannerTemperature + float64(rating.Score)
 		profile.TotalRatings++
-		profile.MannerScore = totalScore / float64(profile.TotalRatings)
+		profile.MannerTemperature = totalScore / float64(profile.TotalRatings)
 
 		if rating.IsNoShow {
 			profile.NoShowCount++
@@ -225,4 +227,21 @@ func (r *UserRepository) RateUser(rating *models.UserRating) error {
 
 func (r *UserRepository) ReportUser(report *models.ReportUser) error {
 	return r.db.Create(report).Error
+}
+
+// UpdateUserAvatar 사용자 아바타 업데이트
+func (r *UserRepository) UpdateUserAvatar(tx *gorm.DB, userID uint, emoji string) error {
+	return tx.Model(&models.UserProfile{}).
+		Where("user_id = ?", userID).
+		Update("avatar", emoji).Error
+}
+
+// GetUserProfile 사용자 프로필 조회
+func (r *UserRepository) GetUserProfile(userID uint) (*models.UserProfile, error) {
+	var profile models.UserProfile
+	err := r.db.Where("user_id = ?", userID).First(&profile).Error
+	if err != nil {
+		return nil, err
+	}
+	return &profile, nil
 }

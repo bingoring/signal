@@ -27,6 +27,7 @@ type UserServiceInterface interface {
 	RateUser(raterID uint, req *models.UserRating) error
 	ReportUser(reporterID uint, req *models.ReportUser) error
 	RefreshToken(refreshToken string) (*models.User, string, error)
+	UpdateUserActivity(userID uint, action string, signalID *uint) error
 }
 
 type UserService struct {
@@ -75,7 +76,7 @@ func (s *UserService) Register(req *models.CreateUserRequest) (*models.User, str
 	profile := &models.UserProfile{
 		UserID:      user.ID,
 		DisplayName: req.DisplayName,
-		MannerScore: 36.5, // 기본 매너 점수 (36.5도)
+		MannerTemperature: 36.5, // 기본 매너 점수 (36.5도)
 	}
 
 	// 프로필을 별도로 생성하거나 사용자와 함께 생성
@@ -126,7 +127,7 @@ func (s *UserService) RegisterOAuth(req *models.CreateUserRequest) (*models.User
 	profile := &models.UserProfile{
 		UserID:      user.ID,
 		DisplayName: req.DisplayName,
-		MannerScore: 36.5, // 기본 매너 점수 (36.5도)
+		MannerTemperature: 36.5, // 기본 매너 점수 (36.5도)
 	}
 
 	user.Profile = profile
@@ -229,12 +230,15 @@ func (s *UserService) UpdateProfile(userID uint, req *models.UpdateProfileReques
 		user.Profile = &models.UserProfile{UserID: userID}
 	}
 
-	// 프로필 정보 업데이트
+	// 프로필 정보 업데이트 - Phase 1 기준으로 수정
 	user.Profile.DisplayName = req.DisplayName
-	user.Profile.Avatar = req.Avatar
-	user.Profile.Bio = req.Bio
-	user.Profile.Age = req.Age
-	user.Profile.Gender = req.Gender
+	if req.Avatar != nil {
+		user.Profile.Avatar = req.Avatar
+	}
+	if req.OneLine != nil {
+		user.Profile.OneLine = req.OneLine
+	}
+	// NotificationsEnabled 필드는 UserProfile 모델에 없으므로 생략
 
 	if err := s.userRepo.Update(user); err != nil {
 		s.logger.Error("프로필 업데이트 실패", err)
@@ -370,4 +374,16 @@ func (s *UserService) RefreshToken(refreshToken string) (*models.User, string, e
 	}
 
 	return user, accessToken, nil
+}
+
+// UpdateUserActivity updates user's manner temperature based on activity
+func (s *UserService) UpdateUserActivity(userID uint, action string, signalID *uint) error {
+	// TODO: Implement proper manner temperature calculation in Phase 2
+	// For now, just log the activity update
+	signalInfo := "없음"
+	if signalID != nil {
+		signalInfo = fmt.Sprintf("Signal %d", *signalID)
+	}
+	s.logger.Info(fmt.Sprintf("UpdateUserActivity - 사용자 %d, 액션: %s, 시그널: %s (Phase 2에서 구현 예정)", userID, action, signalInfo))
+	return nil
 }

@@ -106,43 +106,12 @@ ADD COLUMN total_interactions INTEGER DEFAULT 0,
 ADD COLUMN preferred_activity_types TEXT[], -- 선호 활동 타입 배열
 ADD COLUMN last_active_at TIMESTAMP DEFAULT NOW();
 
--- 단골 통계 업데이트 트리거 함수
-CREATE OR REPLACE FUNCTION update_buddy_stats() 
-RETURNS TRIGGER AS $$
-BEGIN
-    IF TG_OP = 'INSERT' THEN
-        -- 새로운 단골 관계 생성 시
-        UPDATE user_profiles 
-        SET buddy_count = buddy_count + 1 
-        WHERE user_id = NEW.user1_id OR user_id = NEW.user2_id;
-        RETURN NEW;
-    ELSIF TG_OP = 'DELETE' THEN
-        -- 단골 관계 삭제 시
-        UPDATE user_profiles 
-        SET buddy_count = buddy_count - 1 
-        WHERE user_id = OLD.user1_id OR user_id = OLD.user2_id;
-        RETURN OLD;
-    ELSIF TG_OP = 'UPDATE' AND NEW.status = 'blocked' AND OLD.status = 'active' THEN
-        -- 단골 관계 차단 시
-        UPDATE user_profiles 
-        SET buddy_count = buddy_count - 1 
-        WHERE user_id = NEW.user1_id OR user_id = NEW.user2_id;
-        RETURN NEW;
-    ELSIF TG_OP = 'UPDATE' AND NEW.status = 'active' AND OLD.status = 'blocked' THEN
-        -- 단골 관계 차단 해제 시
-        UPDATE user_profiles 
-        SET buddy_count = buddy_count + 1 
-        WHERE user_id = NEW.user1_id OR user_id = NEW.user2_id;
-        RETURN NEW;
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- 단골 통계 업데이트 트리거
-CREATE TRIGGER trigger_update_buddy_stats
-    AFTER INSERT OR UPDATE OR DELETE ON user_buddies
-    FOR EACH ROW EXECUTE FUNCTION update_buddy_stats();
+-- 단골 통계 업데이트는 애플리케이션 레벨에서 처리
+-- 이유: 
+-- 1. buddy_count는 실시간 계산으로도 충분히 빠름 (JOIN 쿼리)
+-- 2. 트리거로 인한 동시성 문제 방지
+-- 3. 비즈니스 로직의 명확한 분리
+-- 처리: BuddyService에서 필요할 때 COUNT 쿼리로 계산
 
 -- 단골 관계 조회를 위한 뷰
 CREATE VIEW buddy_relationships AS
@@ -174,7 +143,25 @@ JOIN users u2 ON u2.id = CASE WHEN ub.user1_id < ub.user2_id THEN ub.user2_id EL
 LEFT JOIN user_profiles up1 ON up1.user_id = u1.id
 LEFT JOIN user_profiles up2 ON up2.user_id = u2.id;
 
--- 단골 추천을 위한 함수
+-- =======================================================
+-- 🚨 성능 중요 함수 - DB에서 유지 필요
+-- =======================================================
+-- get_potential_buddies: 단골 추천 알고리즘
+-- 
+-- ⚡ 성능상 중요한 이유:
+-- 1. 복잡한 4-5개 테이블 조인 (users, user_profiles, signal_interactions, signals, user_buddies)
+-- 2. 집계 연산 (COUNT, ARRAY_AGG) 포함
+-- 3. 복잡한 서브쿼리와 NOT IN 조건
+-- 4. 중복 제거 및 정렬 로직
+-- 
+-- 🔄 GORM 변환시 예상 문제:
+-- - N+1 쿼리 문제 발생 가능성
+-- - 메모리 사용량 급증 (대량 데이터 로드)
+-- - 응답 시간 2-3배 증가 예상
+--
+-- 📊 사용 위치: BuddyRepository.GetPotentialBuddies()
+-- =======================================================
+
 CREATE OR REPLACE FUNCTION get_potential_buddies(
     target_user_id INTEGER,
     min_interactions INTEGER DEFAULT 2,
