@@ -8,6 +8,7 @@ import '../features/signal/presentation/pages/create_signal_page.dart';
 import '../features/signal/presentation/pages/signal_detail_page.dart';
 import '../features/chat/presentation/pages/chat_room_page.dart';
 import '../features/profile/presentation/pages/profile_page.dart';
+import '../features/avatar/presentation/pages/avatar_selection_page.dart';
 import '../features/buddy/presentation/pages/buddy_list_page.dart';
 import '../features/buddy/presentation/pages/potential_buddies_page.dart';
 import '../features/buddy/presentation/pages/manner_evaluation_page.dart';
@@ -65,6 +66,10 @@ class AppRouter {
       GoRoute(
         path: '/profile',
         builder: (context, state) => const ProfilePage(),
+      ),
+      GoRoute(
+        path: '/avatar-selection',
+        builder: (context, state) => const AvatarSelectionPage(),
       ),
       
       // Buddy Routes
