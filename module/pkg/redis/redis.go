@@ -174,6 +174,20 @@ func (c *Client) IsUserOnline(ctx context.Context, userID uint) (bool, error) {
 	return c.SIsMember(ctx, "online_users", userID)
 }
 
+// Counter 관련 메서드들
+func (c *Client) Incr(ctx context.Context, key string) (int64, error) {
+	return c.rdb.Incr(ctx, key).Result()
+}
+
+func (c *Client) Decr(ctx context.Context, key string) (int64, error) {
+	return c.rdb.Decr(ctx, key).Result()
+}
+
+// Key 패턴 검색
+func (c *Client) Keys(ctx context.Context, pattern string) ([]string, error) {
+	return c.rdb.Keys(ctx, pattern).Result()
+}
+
 func (c *Client) Close() error {
 	return c.rdb.Close()
 }
