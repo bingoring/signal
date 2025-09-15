@@ -43,6 +43,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	// PostGIS 초기화
+	postgisInit := services.NewPostGISInitializer(db.DB, appLogger)
+	if err := postgisInit.InitializePostGIS(); err != nil {
+		appLogger.Warn("PostGIS 초기화 경고", err)
+	}
+	
+	// 지리적 데이터 유효성 검사
+	if err := postgisInit.ValidateGeographicData(); err != nil {
+		appLogger.Warn("지리적 데이터 검증 경고", err)
+	}
+
 	redisClient, err := redis.New(&cfg.Redis)
 	if err != nil {
 		appLogger.Error("Redis 연결 실패", err)
@@ -67,7 +78,10 @@ func main() {
 	buddyService := services.NewBuddyService(buddyRepo, userRepo, appLogger)
 	avatarService := services.NewAvatarService(avatarRepo, userRepo, appLogger, db.DB)
 	stdLogger := log.New(os.Stdout, "[CHAT-WS] ", log.LstdFlags)
-	chatWebSocketService := services.NewChatWebSocketService(db.DB, stdLogger)
+	chatWebSocketService := services.NewChatWebSocketService(db.DB, stdLogger, redisClient)
+
+	// Geographic service for advanced location-based search
+	geographicService := services.NewGeographicService(db.DB, redisClient, &cfg.Location, appLogger)
 
 	// Email service for magic links
 	emailService := services.NewEmailService(
@@ -89,8 +103,10 @@ func main() {
 	chatHandler := handlers.NewChatHandler(chatService, chatWebSocketService, appLogger)
 	buddyHandler := handlers.NewBuddyHandler(buddyService, appLogger)
 	avatarHandler := handlers.NewAvatarHandler(avatarService, authService)
+	geographicHandler := handlers.NewGeographicHandler(geographicService, appLogger)
+	debugHandler := handlers.NewDebugHandler(postgisInit, appLogger)
 
-	router := setupRouter(cfg, userHandler, authHandler, oauthHandler, signalHandler, chatHandler, buddyHandler, avatarHandler, websocketService, jwtManager, appLogger)
+	router := setupRouter(cfg, userHandler, authHandler, oauthHandler, signalHandler, chatHandler, buddyHandler, avatarHandler, geographicHandler, debugHandler, websocketService, jwtManager, appLogger)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Server.Port,
@@ -131,6 +147,8 @@ func setupRouter(
 	chatHandler *handlers.ChatHandler,
 	buddyHandler *handlers.BuddyHandler,
 	avatarHandler *handlers.AvatarHandler,
+	geographicHandler *handlers.GeographicHandler,
+	debugHandler *handlers.DebugHandler,
 	websocketService *services.WebSocketService,
 	jwtManager *utils.JWTManager,
 	appLogger *logger.Logger,
@@ -266,6 +284,31 @@ func setupRouter(
 				avatars.POST("/favorite", avatarHandler.ToggleFavorite)
 				avatars.GET("/stats", avatarHandler.GetUserAvatarStats)
 				avatars.GET("/personality", avatarHandler.GetPersonalityAnalysis)
+			}
+
+			// 고급 지리적 검색 API
+			geographic := authenticated.Group("/geographic")
+			{
+				// 고급 검색 및 분석
+				geographic.POST("/search", geographicHandler.AdvancedSearch)
+				geographic.GET("/density", geographicHandler.GetDensityMap)
+				geographic.GET("/hotspots", geographicHandler.GetHotspots)
+				geographic.GET("/statistics", geographicHandler.GetLocationStatistics)
+				geographic.GET("/poi-analysis", geographicHandler.GetNearbyPoiAnalysis)
+				
+				// 특수 검색 타입
+				geographic.POST("/polygon", geographicHandler.SearchInPolygon)
+				geographic.POST("/route", geographicHandler.SearchAlongRoute)
+			}
+
+			// 디버그 및 관리 API (개발 환경에서만)
+			if cfg.Server.Mode == "debug" {
+				debug := authenticated.Group("/debug")
+				{
+					debug.GET("/postgis", debugHandler.GetPostGISInfo)
+					debug.GET("/geographic-stats", debugHandler.GetGeographicStatistics)
+					debug.POST("/validate-geographic", debugHandler.ValidateGeographicData)
+				}
 			}
 		}
 	}
