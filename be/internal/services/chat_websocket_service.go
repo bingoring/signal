@@ -66,13 +66,17 @@ type ChatWebSocketService struct {
 	rooms     map[string]*ChatRoom
 	roomMutex sync.RWMutex
 	logger    *log.Logger
+	
+	// Performance optimization
+	optimizer *ChatPerformanceOptimizer
 }
 
-func NewChatWebSocketService(db *gorm.DB, logger *log.Logger) *ChatWebSocketService {
+func NewChatWebSocketService(db *gorm.DB, logger *log.Logger, redisClient *redis.Client) *ChatWebSocketService {
 	return &ChatWebSocketService{
-		db:     db,
-		rooms:  make(map[string]*ChatRoom),
-		logger: logger,
+		db:        db,
+		rooms:     make(map[string]*ChatRoom),
+		logger:    logger,
+		optimizer: NewChatPerformanceOptimizer(redisClient),
 	}
 }
 
@@ -109,7 +113,11 @@ func (cws *ChatWebSocketService) HandleChatWebSocket(c *gin.Context) {
 		return
 	}
 
-	// Create client
+	// Register optimized connection
+	optimizedClient := cws.optimizer.RegisterConnection(uint(userID), username, conn)
+	cws.optimizer.SubscribeToRoom(uint(userID), roomID)
+
+	// Create traditional client for compatibility
 	client := &ChatClient{
 		UserID:   uint(userID),
 		Username: username,
@@ -121,9 +129,9 @@ func (cws *ChatWebSocketService) HandleChatWebSocket(c *gin.Context) {
 	// Register client
 	room.Join <- client
 
-	// Start goroutines for reading and writing
-	go client.writePump()
-	go client.readPump()
+	// Start goroutines for reading and writing with optimization
+	go cws.optimizedWritePump(optimizedClient, client)
+	go cws.optimizedReadPump(optimizedClient, client)
 
 	// Keep connection alive until client disconnects
 	select {}
@@ -586,4 +594,164 @@ func generateQuickReplyContent(quickReplyType string) string {
 	default:
 		return "빠른 응답"
 	}
+}
+
+// optimizedWritePump handles sending messages to client with performance optimization
+func (cws *ChatWebSocketService) optimizedWritePump(optimizedClient *OptimizedClient, client *ChatClient) {
+	ticker := time.NewTicker(54 * time.Second)
+	defer func() {
+		ticker.Stop()
+		optimizedClient.Conn.Close()
+		cws.optimizer.DisconnectUser(optimizedClient.UserID)
+	}()
+
+	for {
+		select {
+		case data, ok := <-optimizedClient.Send:
+			optimizedClient.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if !ok {
+				optimizedClient.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+
+			if err := optimizedClient.Conn.WriteMessage(websocket.TextMessage, data); err != nil {
+				cws.logger.Printf("WebSocket write error for user %d: %v", optimizedClient.UserID, err)
+				return
+			}
+
+		case message, ok := <-client.Send:
+			// Fallback to traditional message handling
+			optimizedClient.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if !ok {
+				optimizedClient.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+
+			if err := optimizedClient.Conn.WriteJSON(message); err != nil {
+				cws.logger.Printf("WebSocket JSON write error for user %d: %v", optimizedClient.UserID, err)
+				return
+			}
+
+		case <-ticker.C:
+			optimizedClient.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := optimizedClient.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		}
+	}
+}
+
+// optimizedReadPump handles receiving messages from client with performance optimization
+func (cws *ChatWebSocketService) optimizedReadPump(optimizedClient *OptimizedClient, client *ChatClient) {
+	defer func() {
+		client.Room.Leave <- client
+		optimizedClient.Conn.Close()
+		cws.optimizer.UnsubscribeFromRoom(optimizedClient.UserID, client.Room.ID)
+		cws.optimizer.DisconnectUser(optimizedClient.UserID)
+	}()
+
+	optimizedClient.Conn.SetReadLimit(512)
+	optimizedClient.Conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	optimizedClient.Conn.SetPongHandler(func(string) error {
+		optimizedClient.Conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		optimizedClient.LastSeen = time.Now()
+		return nil
+	})
+
+	for {
+		var msgData map[string]interface{}
+		if err := optimizedClient.Conn.ReadJSON(&msgData); err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				cws.logger.Printf("WebSocket error for user %d: %v", optimizedClient.UserID, err)
+			}
+			break
+		}
+
+		// Update last seen
+		optimizedClient.LastSeen = time.Now()
+
+		// Validate message data
+		content, contentOk := msgData["content"].(string)
+		msgType, typeOk := msgData["type"].(string)
+
+		if !typeOk {
+			continue
+		}
+
+		// Create base message
+		message := &ChatMessage{
+			RoomID:    client.Room.ID,
+			UserID:    client.UserID,
+			Username:  client.Username,
+			Content:   content,
+			Type:      msgType,
+			Timestamp: time.Now(),
+		}
+
+		// Process different message types
+		switch msgType {
+		case "text", "image":
+			if !contentOk || content == "" {
+				continue
+			}
+		case "location":
+			// 위치 정보 처리
+			if lat, ok := msgData["latitude"].(float64); ok {
+				message.Latitude = &lat
+			}
+			if lon, ok := msgData["longitude"].(float64); ok {
+				message.Longitude = &lon
+			}
+			if addr, ok := msgData["address"].(string); ok {
+				message.Address = addr
+			}
+			if message.Content == "" {
+				message.Content = "위치를 공유했습니다"
+			}
+		case "quick_reply":
+			// 빠른 응답 처리
+			if qrType, ok := msgData["quick_reply_type"].(string); ok {
+				message.QuickReplyType = qrType
+				// 빠른 응답 타입에 따라 기본 메시지 설정
+				if message.Content == "" {
+					message.Content = generateQuickReplyContent(qrType)
+				}
+			} else {
+				continue // quick_reply_type이 없으면 무시
+			}
+		default:
+			if !contentOk || content == "" {
+				continue
+			}
+		}
+
+		// Use optimized broadcasting instead of traditional room message channel
+		go func(msg *ChatMessage) {
+			// Save to database first
+			client.Room.saveMessage(msg, cws)
+			
+			// Cache in Redis for performance
+			if err := cws.optimizer.CacheMessage(client.Room.ID, msg); err != nil {
+				cws.logger.Printf("Failed to cache message: %v", err)
+			}
+			
+			// Use optimized broadcast
+			cws.optimizer.BroadcastToRoom(client.Room.ID, msg)
+		}(message)
+	}
+}
+
+// GetOptimizedMetrics returns performance metrics from the optimizer
+func (cws *ChatWebSocketService) GetOptimizedMetrics() *ChatMetrics {
+	return cws.optimizer.GetMetrics()
+}
+
+// GetActiveConnectionsCount returns the count of active optimized connections
+func (cws *ChatWebSocketService) GetActiveConnectionsCount() int {
+	return cws.optimizer.GetActiveConnections()
+}
+
+// GetActiveOptimizedRoomsCount returns the count of active optimized rooms
+func (cws *ChatWebSocketService) GetActiveOptimizedRoomsCount() int {
+	return cws.optimizer.GetActiveRoomsCount()
 }
